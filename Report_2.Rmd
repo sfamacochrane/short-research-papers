@@ -1,0 +1,462 @@
+---
+title: 'Report 2: Personal Financial Worry and Candidate Support'
+author: "Sally Cochrane"
+date: "3/22/2021"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(haven)
+library(ggplot2)
+library(stargazer)
+library(kableExtra)
+library(sjPlot)
+#install.packages("arsenal")
+library(arsenal)
+library(knitr)
+library(performance)
+library(see)
+library(qqplotr)
+```
+### Introduction:
+During an election year, the pandemic caused millions of Americans to become financially precarious. The unemployment rate reached 14.8% in April 2020 (Congressional Research Service, 2021), and about half of non-retired adults report long-term financial concerns due to the pandemic (Horowitz, Brown, and Minkin, 2021). These facts lead to a question: does worry about one's personal finances influence political views? Some scholars, such as Hacker, Rehm, and Schlesinger (2013), argue for an "egotropic" theory: that experiencing financial worries influences political opinions. Others, such as Funk and Monet (1997), argue for a "sociotropic" theory: that perceptions of the _national economy_ predict political opinions better than _personal_ financial experience. Using data from the American National Election Survey in 2020 on the question, "So far as you and your family are concerned, how worried are you about your current financial situation?", I use multiple regression to evaluate whether worry about personal finances is associated with support for the Democratic Presidential candidate, controlling for view of the national economy and other demographic variables. I find weak support for the egotropic theory and more robust support for the sociotropic theory. 
+
+### Theory:
+The "egotropic" theory states that personal finances influence political views, while the "sociotropic" theory states that views of the health of the _national economy_ influence voters' political views more than personal experience (for review, see Nannestad and Paldam, 1993). Hacker, Rehm, and Schlesinger (2013) found that individuals who experienced more economic worries and "shocks" (such as job loss) during and after the Great Recession were more likely to support Democratic policies. Similarly, Kiewiet (1981) found that unemployed voters were more likely to support Democratic candidates in Presidential elections in the 1960s and 70s. On the other side, Kinder, Adams, and Gronke (1989) found that personal economic well-being mattered much less to voters' decisions than national economic well-being in the 1984 Presidential election. Similarly, Funk and Garcia-Monet (1997) found that, although assessment of the national economy had an influence on political views, and personal finances had an influence on assessment of the national economy, the "indirect" relationship between personal finances and political views was actually quite weak. Since there is robust evidence that voters blame the incumbent for the health of the economy (Lewis-Beck and Stegmaier, 2000), both the sociotropic and the egotropic theory predict that the more someone is worried (about the national economy or their personal finances), the more they would favor Biden over Trump. I ask here whether personal financial worry is associated with support for Biden (the egotropic theory), controlling for worry for the national economy (the sociotropic theory). 
+
+```{r data-cleaning, include = FALSE}
+## DATA CLEANING: 
+
+# Read in the dataset, ANES timeseries 2020:
+anes <- read_dta("anes_timeseries_2020_stata_20210211.dta")
+
+# Select relevant columns: 
+study <- anes %>% select (V200001, V201228, V201600, V201511x, V201549x, V201617x,
+                       V201507x, V201335, V201152, V201151, V201594)
+
+# Rename the columns:             
+study <- study %>% 
+    mutate(ID = V200001, 
+           party = V201228,
+           sex = V201600, 
+           education = V201511x, 
+           race = V201549x,
+           income = V201617x,
+           age = V201507x,
+           # Worry about the national economy:
+           nation_worry = V201335,
+           # Main explanatory and outcome variables:
+           feeling_Biden = V201151, 
+           # Personal financial worry:  
+           self_worry = V201594) 
+
+
+# Remove "don't know" and "refused" (-8, -9), as per above: 
+study_cleaned <- study %>% 
+    mutate(
+        ID = ID, 
+        feeling_Biden = case_when(
+            feeling_Biden >= 0 & feeling_Biden <=100 ~ feeling_Biden, 
+            TRUE ~ NA_real_),
+        self_worry = case_when(
+            self_worry > 0 ~ self_worry,
+            TRUE ~ NA_real_), 
+        # re-order scale of self_worry to match nation_worry:
+        self_worry_scaled = case_when(
+            self_worry == 1 ~ "5", 
+            self_worry == 2 ~ "4", 
+            self_worry == 3 ~ "3", 
+            self_worry == 4 ~ "2", 
+            self_worry == 5 ~ "1") %>% as.numeric(),
+        nation_worry = case_when(
+            nation_worry > 0 ~ nation_worry, 
+            TRUE ~ NA_real_),
+        party = case_when(
+            party > 0 ~ party, 
+            TRUE ~ NA_real_) %>% as.factor(),
+        party_ID = case_when(
+            party == 1 ~ "Democrat",
+            party == 2 ~ "Republican",
+            party == 3 ~ "Independent",
+            party == 5 ~ "other", 
+            party == 0 ~ "none",
+            TRUE ~ NA_character_) %>% as.factor(),
+        sex = case_when(
+            sex > 0 ~ sex, 
+            TRUE ~ NA_real_) %>% as.factor(),
+        gender = case_when(
+            sex == 1 ~ "male", 
+            sex == 2 ~ "female") %>% as.factor(),
+        education = case_when(
+            education > 0 ~ education, 
+            TRUE ~ NA_real_), 
+        race = case_when(
+            race > 0 ~ race, 
+            TRUE ~ NA_real_),
+        race_fct = case_when(
+            race == 1 ~ "White",
+            race == 2 ~ "Black", 
+            race == 3 ~ "Hispanic", 
+            TRUE ~ "Other") %>% as.factor(),
+        income = case_when(
+            income > 0 ~ income, 
+            TRUE ~ NA_real_),
+        age = case_when(
+            age > 0 ~ age, 
+            TRUE ~ NA_real_)
+    )
+        
+    
+glimpse(study_cleaned)
+ 
+# prep data formats for tableby() and plot_model(): 
+
+study_plot <- study_cleaned %>% 
+    mutate(
+        feeling_Biden = as.numeric(feeling_Biden), 
+        self_worry_scaled = as.numeric(self_worry_scaled), 
+        nation_worry = as.numeric(nation_worry),
+        party_ID = as.character(party_ID),
+        gender = as.character(gender),
+        education = as.numeric(education), 
+        race_fct = as.character(race_fct),
+        age = as.numeric(age), 
+        income = as.numeric(income)
+    )
+
+glimpse(study_plot)
+
+# Save dataset as a CSV file: 
+write.csv(study_plot, "Study.csv", row.names = FALSE)
+
+```
+### Data:
+Data come from the ANES 2020 pre-election time series study, conducted between August 18 and November 3, 2020, with 8,280 respondents. Data recorded as "Don't know" [-8], "Refused" [-9], or missing [998] were re-coded as "NA." The total number "NA" was small (see Appendix for number and percent "NA" in each variable). Respondents answering as a racial category other than "White", "Black", and "Hispanic" were grouped into "Other," as the number was small (727, or 8.8%). Respondents answering "no preference" and "other party" for party affiliation were grouped into "Other", as the number was small (7, or .08%, and 269, or 3.25%). Income and education were coded as numeric variables, because the response categories were of increasing values and likely to have linear relationships with the variables of interest. Income is scaled 1 (under \$9,999) to 22 (\$250,000 or more), and education is scaled from 1 (no high school degree) to 5 (graduate degree), with 3 = college degree. **Table 1** shows summary statistics by personal financial worry, increasing 1 to 5.
+
+```{r tabley, include=FALSE, results = "asis", warning = FALSE, message=FALSE}
+
+# change variable names for a nicer looking table: 
+var_names <- list(
+    feeling_Biden = "Biden Therm.", 
+    self_worry_scaled = "Personal Worry", 
+    nation_worry = "National Worry", 
+    party_ID = "Party", 
+    gender = "Sex",
+    education = "Education",
+    race_fct = "Race", 
+    age = "Age", 
+    income = "Income"
+)
+
+# Make a tableby table, grouped by personal financial worry:
+tab1 <- tableby(self_worry_scaled ~ feeling_Biden + nation_worry +
+            party_ID + education + income + age + race_fct + gender, 
+        data = study_plot, 
+        test = FALSE,
+        digits = 2, 
+        numeric.stats = c("Nmiss", "meansd"),
+        numeric.simplify = TRUE)%>% 
+    summary(removeBlanks = TRUE, 
+            labelTranslations = var_names,
+            title = "Summary Statistics by Personal Financial Worry,
+            1 = Not at all worried, 2 = A little worried, 3 = Moderately worried, 
+            4 = Very worried, 5 = Extremely worried"
+            )
+
+tab1
+```
+
+```{r table-summary-stats, echo=FALSE, results = "asis", warning = FALSE, message=FALSE}
+# Save tableby table as dataframe: 
+summary_stats <- as.data.frame(tab1)
+
+# Re-write variable name columns to get rid of "%nbsp" output from tablby: 
+summary_stats$var <- c("BIDEN THERM.", "   N-Miss", "  Mean (SD)", 
+                       "NATION WORRY", "  N-Miss", "  Mean (SD)",
+                       "PARTY", "  N-Miss", "  Democrat", 
+                       "  Independent", "  Other", "  Republican",
+                       "EDUCATION", "  N-Miss", "  Mean (SD)",
+                       "INCOME", "  N-Miss", "  Mean (SD)",
+                       "AGE", "  N-Miss", "  Mean (SD)",
+                       "RACE", "  Black", "  Hispanic", "  Other", "  White",
+                       "GENDER", "  N-Miss", "  Female","  Male")
+ 
+# Select columns in correct order:                       
+summary_stats <- summary_stats %>% select(var, `1 (N=2475)`, `2 (N=2745)`, `3 (N=1962)`,
+                         `4 (N=587)`, `5 (N=448)`, `Total (N=8217)`)
+
+# Pipe tableby dataframe into a kable table, indenting the subcategory rows.
+summary_stats %>% 
+    kable(
+        format = "latex", 
+        caption = "Summary Statistics by Personal Financial Worry", 
+        booktabs = TRUE, 
+        digits = 2
+    ) %>% 
+  add_indent(positions = c(2,3,5,6,8,9,10,11,12,14,15,17,18,20,21,23,24,25,26,28,29,30),
+             level_of_indent = 1) %>% 
+    kable_styling(
+        latex_options = "hold_position", full_width = F, 
+        bootstrap_options = "striped", font_size = 7) 
+  
+```
+
+### Methods:
+I use multiple regression to evaluate whether worry about personal finances is associated with support for Biden, as measured by the Feeling Thermometer. Multiple regression is appropriate because we want to see if this variable is associated with support for Biden alone, or if controlling for other variables changes its strength as a predictor of support. Diagnostic tests (see Appendix for plots) assessed the assumptions for linear regression. The plot of residuals vs. fitted values shows the residuals approximately cluster around a horizontal line, and boxplots show the data are roughly linear, though not strongly so. Any possible violation of the linearity assumption is therefore not extreme, so we proceed as if it is met. The residuals are approximately normally distributed according to the Normal Q-Q plot and the Histogram of Residuals, meeting the normality assumption. However the Scale-Location plot does not cluster around a perfectly horizontal line, so the equal variance assumption may be violated. Histograms of the variables show "personal worry" is skewed right, and there are a large number of "0"'s for the Feeling Thermometer. However, these were not deemed extreme enough to merit transformations. Finally, the assumption of independence is met because we can assume that no individual's responses influenced another's. The ANES respondents were randomly sampled from a cross-section of adult US citizens, in every state, with one survey per household, so cluster and serial effects are not likely.
+
+```{r model-support-Biden, include = FALSE}
+
+## MODELS - BIDEN THERMOMETER: 
+
+# Reduced model Biden: 
+mod1 <- lm(formula = feeling_Biden ~ self_worry_scaled, data = study_plot)
+summary(mod1)
+
+# + Nation worry model - Biden:
+mod2<- lm(formula = feeling_Biden ~ self_worry_scaled + nation_worry, 
+                  data = study_plot)
+summary(mod2)
+
+
+# Full model - Biden: 
+mod3 <- lm(formula = feeling_Biden ~ self_worry_scaled + nation_worry +
+                           party_ID + gender + education + race_fct + 
+                           income + age, data = study_plot)
+summary(mod3)
+
+```
+
+### Results: 
+As **Table 2** shows, the results of the regression models indicate that personal financial worry is associated with support for Biden when it is the sole explanatory variable (**model 1**), with an increase in the Feeling Thermometer of 4.564 units, or 4.564 percentage points, for every unit increase in personal financial worry. The p-value for this estimate is less than 0.01, making it a statistically significant estimate. However, when we control for worry about the national economy (**model 2**), the p-value for the coefficient of personal financial worry becomes greater than 0.1, indicating that personal worry is _not_ a robust predictor of support for Biden when an individual's worry about the national economy is taken into account. However, in this case worry about the national economy _is_ strongly associated with support for Biden, controlling for personal financial worry, with a 12.128 unit increase in the Feeling Thermometer for every unit increase in worry about the national economy (p-value less than 0.01 for this estimate). If other demographic variables are controlled for along with worry about the national economy (**model 3**), personal financial worry again becomes statistically significantly associated with support for Biden, with an increase in the Feeling Thermometer of 0.718 units for each unit increase in personal worry (p-value of less than 0.05 for this estimate). Note, however, that the _magnitude_ of the predicted increase in support for Biden with every unit increase in personal financial worry is much smaller when other variables are controlled for than when it is the sole explanatory variable, with the full model predicting less than 1/6 as great an increase in support for each unit increase in personal worry as the first model. Note also that in model 3, worry about the national economy is associated with roughly a 6-fold greater _magnitude_ increase in support for Biden than personal worry (4.476 vs. 0.718 percentage points per unit increase worry, respectively), and a statistically significant p-value (less than 0.01). This leads us to conclude that personal worry is associated with support for Biden, but weakly, and that worry about the national economy has a more robust association with support for Biden.  
+
+```{r tables-Biden, results = "asis", echo=FALSE}
+
+ model_labels <- c("Personal worry", "National worry", 
+                 "Indpendent", "Other Party", "Republican", 
+                 "Gender male", "Education",
+                 "Race Hispanic", "Race Other", "Race White", "Income", "Age",
+                 "Constant")
+
+stargazer(mod1, mod2, mod3, 
+          type = "latex", 
+          header = FALSE,
+          no.space = TRUE, 
+          column.sep.width="3pt",
+          font.size = "small", 
+          omit.stat = c("f", "ser"),
+          single.row = TRUE,
+          dep.var.labels = c("Feeling Thermometer - Biden"), 
+          covariate.labels = model_labels)
+```
+
+```{r plot-model-1, echo=FALSE, out.width = "50%"}
+par(mfrow = c(1,2))
+
+# Reduced model - Biden: 
+plot_model(
+    model = mod1, 
+    type = "pred", 
+    terms = c("self_worry_scaled")
+) + 
+    theme_minimal() + 
+    ggtitle("Plot 1: Thermometer Biden vs. Personal Finances Worry Scale") + 
+    labs(y = "Predicted Therm-Biden", 
+         x = "Personal Financial Worry")
+
+# Nation interaction term model - Biden: 
+plot_model(
+    model = mod2, 
+    type = "pred", 
+    terms = c("self_worry_scaled", "nation_worry")
+) + 
+    theme_minimal()+
+    ggtitle("Plot 2: Thermometer Biden vs. Personal Finances Worry Scale") +
+    labs(y = "Predicted Therm-Biden",
+         x = "Personal Financial Worry")
+
+```
+
+**Plot 1** presents the relationship between personal financial worry (increasing, 1 to 5) and the feeling thermometer for Biden as predicted by model 1. **Plot 2** presents the relationship between personal financial worry and the feeling thermometer for Biden, controlling for worry about the nation's economy (increasing worry, 1 to 5), as predicted by model 3. While Thermometer rating increases slightly as personal worry increases within each group of worry about the national economy, the difference in predicted Thermometer rating is best explained by national economic worry. 
+
+### Limitations: 
+There are several limitations to this study. First, the ANES questions may not be perfect measures for the questions asked by the theory section. The Feeling Thermometer is only a proxy for support for, or likelihood to vote for, the Democratic party and policies; and Biden as an individual also may not measure support for all Democratic candidates. Second, this study cannot determine whether worry _causes_ support for a candidate. It may be that political preference dictates worry about personal finances and/or the national economy: people who preferred the incumbent (Trump) may be less worried in general because they trusted his leadership. Third, we cannot generalize this result beyond the year of this sample, 2020. Results might change in different years as other factors, such as the party of the incumbent candidate, change.
+
+### Discussion and Conclusion: 
+The results indicate that worry about one's personal finances is associated with support for candidate Biden (as measured with the Feeling Thermometer) when it is the sole explanatory variable. However, when an individual's worry about the national economy is controlled for, personal financial worry is no longer statistically significantly associated with support for Biden. Finally, when other demographic variables are controlled for along with worry about the national economy, personal financial worry is again associated with support for Biden, though more weakly. These results suggest that the "egotropic" theory is weakly correct, but that the "sociotropic" theory is more robust. These results are likely generalizable to the adult population of US citizens in 2020 but cannot be generalized to past or future years. Studies of different years would be needed to establish whether this association holds over time. These results also only suggest an association between worry and political views, not a causal relationship. Finally, it is possible that personal financial worry may be collinear with worry about the nation's economy, because personal worry becomes a statistically insignificant predictor when worry about the national economy is taken into account. This may reduce our confidence in the results, and further research could test their correlation. Further research could also indicate which of the variables in the full model are the most important controls. For example, it may be that income level moderates personal financial worry, or that those with more education are more aware of issues affecting the national economy, but that other variables are not important controls. 
+
+\newpage
+### Bibliography: 
+
+* American National Election Studies. 2021. ANES 2020 Time Series Study Preliminary Release: Pre-Election
+    Data [dataset and documentation]. February 11, 2021 version. www.electionstudies.org
+
+* Congressional Research Service. (2021). _Unemployment Rates During the COVID-19 Pandemic: In 
+    Brief_. https://crsreports.congress.gov
+
+* Funk, Carolyn L., and Patricia A. García-Monet. (1997). "The Relationship between Personal and 
+    "National Concerns in Public Perceptions about the Economy." _Political Research Quarterly_, 
+     50(2):317-342.
+
+* Hacker, Jacob S., Philipp Rehm, and Mark Schlesinger. (2013). "The Insecure American: Economic 
+    "Experiences, Financial Worries, and Policy Attitudes." _Perspectives on Politics_, 11(1):
+     23-49. 
+
+* Horowitz, Juliana Menasce, Anna Brown, and Rachel Minkin. (March 5, 2021). "A Year into the
+    Pandemic, Long-Term Financial Impact Weighs Heavily on Many Americans." _Pew Research Center:
+    Social & Demographic Trends_.
+
+* Kiewiet, D. Roderick (1981). “Policy-Oriented Voting in Response to Economic Issues.” _American
+    Political Science Review_ 75 : 448–59.
+
+* Kinder, Donald R., Gordon S. Adams, and Paul W. Gronke. (1989). "Economics and Politics in the
+    1984 American Presidential Election." _American Journal of Political Science_, 33(2) : 491-515.
+
+* Lewis-Beck, Michael S., and Mary Stegmaier. (2000). "Economic Determinants of Electoral Outcomes."
+    _Annu.Rev.Polit. Sci._, 3 : 183-219. 
+    
+* Nannestad, Peter, and Martin Paldam. (1994). "The VP-function: A survey of the literature on vote 
+    and popularity functions after 25 years." _Public Choice_, 79 : 213-245. 
+
+\newpage
+## Appendix: 
+
+### Data Transformations: how many "NA"'s in each variable?  
+
+**Party ID**: 49 observations were recorded as technical error, don't know, or refused = 0.59%, and 7 stated no preference, or 0.08%. 269 people responded "other party", or 3.25%. Since "independent" was a possible response category (garnering 30.5% of the sample), I assume the "other party" respondents did _not_ identify as independent. 
+
+**Sex**: 67 refused, or 0.81%. 
+
+**Education**: 131 observations were missing, don't know, or refused = 1.58% of the sample.
+
+**Race**: 727 people, or 8.78% of the sample, identified as a race other than White, Black, or Hispanic, and another 102 people, or 1.23% answered "don't know" or refused the question. Since these, in total, are a small proportion of the sample (10.01%), they were grouped together as "other". 
+
+**Age**: 354 people, or 4.41%, refused to answer.
+
+**Income**: 615 observations recorded as interview breakoff and refused, or 7.42%. 
+
+To the question, **"Overall, how worried are you about the national eocnomy?"**, 18 people refused or didn't answer. 
+
+**Feeling thermometers**: 219 refused to answer the feeling thermometer for Biden. One respondent had "998" recorded as a response. These represent 2.6% of the sample.
+
+To the question, **"So far as you and your family are concerned, how worried are you about your current financial situation?"**, 63 responded don't know or refused, or 0.76% of the total sample. 
+
+```{r import-data-explore, include = FALSE}
+
+# NUMBER NA in EACH CATEGORY: 
+
+anes %>% nrow() # 8280 observations total
+
+    # Party_ID (V201228): 
+anes %>% filter(V201228 == 5) %>% nrow() # other party = 269 or 3.25%
+anes %>% filter(V201228 == 3) %>% nrow() # Independents = 2527 or 30.52%
+anes %>% filter(V201228 < 0) %>% nrow() # 49 technical error, don't know, refused = 0.59%
+anes %>% filter(V201228 == 0) %>% nrow() # 7 no preference = 0.08%
+
+    # sex (V201600):
+anes %>% filter(V201600 < 0) %>% nrow() # 67 refused = 0.81%
+anes %>% filter(V201600 > 2) %>% nrow() # 0 
+
+    # Education (V201511x): V201511x
+anes %>% filter(V201511x < 0) %>% nrow() # 131 missing, don't know, refused = 1.58%
+anes %>% filter(V201511x > 5) %>% nrow() # 0 
+
+    # Race: can we simplify to White, Black, and Hispanic?
+anes %>% filter(V201549x ==4 | V201549x == 5 | V201549x == 6) %>% nrow()
+        # 727 answer not W,B,or H = 8.78%
+anes %>% filter(V201549x < 0) %>% nrow()
+        # 102 refused or don't know = 1.23%
+anes %>% filter(V201549x > 6) %>% nrow() #0 
+
+    # Income (V201617x): 
+anes %>% filter(V201617x <0) %>% nrow() #615 interview breakoff and refused = 7.42% 
+anes %>% filter(V201617x > 22) %>% nrow() # 0 
+
+    # Age (V201507x):
+anes %>% filter(V201507x <0 ) %>% nrow() # 354 refused = 4.28%
+anes %>% filter(V201507x > 80) %>% nrow() # 0 
+
+    # Worry national economy (V201335): [1.Not at all to 5. Extremely]
+anes %>% filter(V201335 < 0) %>% nrow() # 18 refused/don't know
+anes %>% filter(V201335 > 5) %>% nrow() # 0 
+
+    # Feeling Biden (V201151): 
+anes %>% filter(V201151 < 0) %>% nrow() # 219 refused = 2.64%
+anes %>% filter(V201151 > 100) %>% nrow() # 1 recorded as 998
+
+    # Worry about personal financial situation (V201594): 
+        # [1. Extremely to 5. Not at all]
+anes %>% filter(V201594 < 0) %>% nrow() # 63 don't know/refused = 7.6%
+anes %>% filter(V201594 >5) %>% nrow()  #0 
+
+```
+
+
+
+## Diagnostic Plots for Assumptions for Linear Regression:  
+
+A scatterplot to test for the linearity assumption was not visually useful due to overplotting, so boxplots were used to visually assess linearity. 
+
+```{r boxplot, echo=FALSE, warning = FALSE, message= FALSE, out.width = "75%"}
+ggplot(data=study_plot, aes(x=as.factor(self_worry_scaled), y = feeling_Biden))+
+  geom_boxplot()+
+  labs(title = "Boxplot of Biden Feeling Thermometer vs. Personal Financial Worry", 
+       x= "Personal Financial Worry",
+       y = "Biden Feeling Thermometer")+
+  scale_x_discrete(labels = c("1. Not at all worried", "2. A little worried", "3. Moderately worried", "4. Very worried", "5. Extremely worried"))
+```
+
+```{r histogram-variables, echo = FALSE, message = FALSE}
+par(mfrow = c(2,2))
+hist(mod3$residuals, 
+     main = "Histogram of Residuals",
+     xlab = "Residuals")
+hist(study_cleaned$feeling_Biden, 
+     main = "Histogram of \nBiden Feeling Thermometer", 
+     xlab = "Feeling Thermometer")
+hist(study_cleaned$self_worry_scaled,
+     main = "Histogram of \nPersonal Financial Worry",
+     xlab = "Personal Financial Worry Scale")
+hist(study_cleaned$nation_worry,
+     main = "Histogram of \nWorry over National Economy",
+     xlab = "National Economy Worry Scale")
+hist(study_cleaned$education, 
+     main = "Histogram of Education",
+     xlab = "Education, \n1 = less than high school, \n5 = graduate degree")
+hist(study_cleaned$income, 
+     main = "Histogram of Income",
+     xlab = "Income, \n1 = under $9,999, \n22 = $250,000 or more")
+hist(study_cleaned$age,
+     main = "Histogram of Age", 
+     xlab = "Age, years")
+party_counts <- table(study_cleaned$party_ID) # counts for each party ID
+barplot(party_counts, 
+        main = "Party Affiliation", 
+        xlab = "Party Affiliation")
+race_counts <- table(study_cleaned$race_fct) # counts for each race
+barplot(race_counts, 
+        main = "Bar Plot of Race", 
+        xlab = "Race")
+gender_counts <- table(study_cleaned$gender) # counts for each gender
+barplot(gender_counts,
+        main = "Bar Plot of Gender", 
+        xlab = "Gender")
+```
+
+```{r assess-regression-1, echo=FALSE, warning = FALSE, message = FALSE}
+par(mfrow = c(2,2))
+plot(mod3)
+
+```
+
+```{r assess-regression-2, echo=FALSE, warning = FALSE, message = FALSE}
+par(mfrow = c(6,1))
+performance::check_model(mod3)
+```
+
+
+

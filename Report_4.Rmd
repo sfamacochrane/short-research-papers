@@ -1,0 +1,1506 @@
+---
+title: 'Report 4: Add Health'
+author: "Sally Cochrane"
+date: "4/26/2021"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+header-includes: \usepackage{float} \floatplacement{figure}{h}
+---
+
+```{r setup, echo = FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE, 
+	fig.pos = "H"
+)
+```
+
+```{r load_packages, echo = FALSE}
+library(sjlabelled)
+library(stargazer)
+library(kableExtra)
+library(dplyr)
+library(sjPlot)
+library(ggplot2)
+library(MatchIt)
+library(cobalt)
+library(Amelia)
+library(xtable)
+options(xtable.comment = FALSE)
+
+#install.packages("cowplot", repos = 'http://cran.us.r-project.org')
+suppressMessages(library(cowplot))
+
+# set seed: 
+set.seed(0)
+
+```
+
+## 1 Introduction
+
+Does participation in high school sports increase educational attainment? With increasing pressure on school budgets, especially after the economic downturn caused by the pandemic (Turner, 2020), should schools cut their coaches and sports teams to save money, or is there an educational return on investment from sports? On the one hand, sports could teach discipline, teamwork, and improve overall mood and health, which could in turn improve academic performance. And indeed, some scholars find that participating in school sports has beneficial effects on academic performance and outcomes, from raising GPA (Fox et al., 2009) to increasing college attendance (Marsh, 1993). On the other hand, spending time on sports could cause students to spend less time studying, which could cancel out any beneficial effects of sports. Indeed, some scholars find little to no effect of sports participation on educational outcomes. They argue that any attainment differences between athletes and non-athletes are due to pre-existing individual differences such as in motivation and self-discipline (Daley and Ryan, 2000, Rees and Sabia, 2010). Using data from the National Longitudinal Study of Adolescent to Adult Health (Add Health), we use covariate balancing propensity score (CBPS) matching and linear regression to evaluate how participation in at least one school sport in Wave 1 (1994-95) was associated with educational attainment at Wave 4 (2008-2009). We find evidence consistent with the theory that there is no association between sports participation and educational attainment. 
+
+## 2 Theory
+
+Does participation in high school sports increase educational attainment later in life? On the one hand, participating in sports may build self-discipline, self-esteem, and improve teamwork; features that could help success in school. On the other hand, participating in sports takes away time from studying, and so may have no effect or a negative effect on academic performance. Some scholars have found evidence for the first hypothesis. Marsh (1993), studying high schoolers in 1980 to 1984, found that those who participated in sports during the last two years of high school experienced a range of positive effects: they had increased educational aspirations, reduced absenteeism, and increased subsequent college attendance. Fox et al. (2009) found positive associations between sports participation and higher GPA's in high school for both boys and girls, and girls (but not boys) who did any physical activity also had higher GPA's. Finally, Barron, Ewing, and Waddell (2000) found that high school athletic participation was associated with higher wages and higher educational attainment after high school. However, they remark that it is unclear whether this merely reflected pre-existing differences between individuals' ability or value of leisure time. Other scholars have found modest to negative associations between sports participation and academic outcomes. Rees and Sabia (2010), using data from the National Longitudinal Study of Adolescent Health, found that sports participation was associated with a modest increase in GPA, but that most of this association could be explained by pre-existing individual differences such as motivation, future-orientedness, and self-discipline. Daley and Ryan (2000) found a weakly _negative_ correlation between participation in physical activity and English grades for children ages 13 - 16, and no correlation between physical activity and grades in Math and Science. Eide and Ronan (2001) found mixed effects, depending on sex and race: sports participation had a negative effect on educational attainment for white male students; a positive effect for black male students, and a positive effect on white female students, with no effect on Hispanic males or black and Hispanic female students. 
+
+## 3 Data
+
+Data come from the Add Health longitudinal study of adolescents in grades 7-12 in the United States during the 1994-95 school year (Wave 1), and from follow-up interviews in 2008-2009 when the respondents were 24 to 32 years old (Wave 4). The outcome variable of interest was the highest level of education that the respondent had achieved to date in Wave 4 (2008-2009), ranging from 1 (8th grade or less) to 13 (completed a doctoral degree), with 6 = some college and 7 = completed college (see Appendix for complete coding of education). The treatment variable of interest was whether the student participated in any organized sports at Wave 1. Respondents who reported participating in one or more sports were coded as participating in sports; if they did not mark any sport, they were coded as not participating. Control variables included income in thousands of dollars (reported by a parent in Wave 1); sex; race; self-reported overall health on a scale of 1 (poor) to 5 (excellent); the respondent's desire to attend college from 1 (low) to 5 (high); whether they report drinking alcohol, as some scholars have found that sports participation is associated with increased alcohol use, which may have an effect on academic performance (Mays et al, 2010); and the mean of the parents' educational attainment, from 0 (never went to school) to 8 (professional training beyond 4-year college/university), with 7 = college graduate. The mean was taken because there was no reason from theory to investigate each parents' educational level separately. Other controls included current grades at wave 1, calculated from self-reported English, History, Math, and Science grades, ranging 1 (D or below) to 4 (A). This measure was preferred to the transcripts of cumulative GPAs obtained in wave 3 because if sports do have an effect on educational attainment, they may do so by raising GPA subsequent to sports exposure, and we wanted a measure of academic performance that was as close as possible to a "baseline" as a control variable.
+
+The data contained a significant amount of missingness. 25.8% (1318 entries) was missing for participation in a sport. These observations were removed because this was the treatment of interest, so it was not appropriate to impute the data. Once these missing entries were removed, the variables with the most missingness were income, parent education, and current grades, which were missing 21.9% (831 entries), 11.7% (443 entries), and 1.87% (71 entries) respectively. By substituting the adolescent's report of their resident parents' education levels when the parent's self-report was missing, this missingness was reduced to 0.975% (37 entries). This was deemed acceptable because the distribution of adolescents' reports of average resident parent education was similar to the distribution of parents' self-reported level of education (see Appendix for comparison plots). The rest of the missing data was imputed with Amelia. It was necessary to impute income because exploratory analysis showed that missingness in income was likely not random. Entries with missing income had lower rates of receiving public assistance and were more likely to be able to pay their bills than entries without missing income (see Appendix for analysis), which suggests that participants with missing income data may have had higher incomes than participants without missing income data. Income was logged before imputation, in order to make the distribution closer to normal for linear regression. Other variables with a small amount of missingness (less than 2%) were also imputed with Amelia, as this was unlikely to change the results. Several variables were included only for imputation as they were likely to help predict income and grades. For income, these were: parents' ability to pay all their bills, whether they received public assistance, and whether the parent and the parent's partner were employed full-time; and for grades, these were: whether the student had repeated a grade, been suspended, or had trouble completing homework. After imputation, there was no missing data (See Appendix for summary of imputation procedure). 
+
+The data was imbalanced between the sports and non-sports groups in several variables. Out of 3796 students, 2164, or 57%, participated in sports. More males participated in sports than females; health was better in the sports group; sports players had higher grades; and more sports players wanted to go to college. Race, alcohol use, log income, and parent education were roughly similar in treatment and control groups. (See appendix for plots). Four matching methods were examined, and CBPS matching was selected as providing the best balance of the data. **Table 1** shows summary statistics before and after matching. (See appendix for plots of the balance of covariates with the four matching methods). 
+
+
+```{r load-data, include = FALSE, eval=FALSE}
+
+# verbose = TRUE tells us which the names of the data objects loaded
+load("21600-0001-Data.rda", verbose = TRUE)  
+load("21600-0022-Data.rda", verbose = TRUE)
+
+# assign data to shorter named file
+ah1 <- da21600.0001 # wave 1 (Sports, control variables)
+ah4 <- da21600.0022 # wave 4 (Educational attainment)
+
+dim(ah1)
+names(ah1)[1:10]
+
+dim(ah4)
+names(ah4)[1:10]
+
+```
+
+```{r name-columns, include = FALSE, eval = FALSE}
+ah1 <- ah1 %>%
+  mutate(
+    baseball = S44A18, 
+    basketball = S44A19, 
+    field_hockey = S44A20, 
+    football = S44A21, 
+    ice_hockey = S44A22, 
+    soccer = S44A23, 
+    swimming = S44A24, 
+    tennis = S44A25, 
+    track = S44A26, 
+    volleyball = S44A27, 
+    wrestling = S44A28,
+    other_sport = S44A29, 
+    # Control variables: 
+    age = S1, 
+    sex = BIO_SEX, # 1 = Male,  2 = Female, 6 = Refused, 8 = DK
+    hispanic = H1GI4, # 0 = no, 1 = yes, 6 = Refused, 8 = DK
+    white = H1GI6A, # 0 = no, 1 = yes, 6 = ref, 8 = DK
+    black = H1GI6B, 
+    native_american = H1GI6C, 
+    Asian_PI = H1GI6D,
+    other_race = H1GI6E,
+    health = H1GH1, # 1= excellent; 2 = very good... 5 = poor, 6 = ref, 8 = DK
+    parent_response_ed = PA12, #1 = 8th grade or less - 9 beyond college; 10 = never went, 96 = refused, 885 are missing
+    parent_partner_ed = PB8, # 97 no partner
+    res_dad_ed = H1RF1,
+    res_mom_ed = H1RM1,
+    income = PA55, # range, 996 refused
+    pay_bills = PA56, 
+    public_assistance = PA21, # 0 =not receiving public assistance, 1 = yes , 
+    parent_employed = PA17, # 0 = no, 1 = yes (employed full time), 
+    partner_employed = PB13,
+    aspirations_college = H1EE1, # how much do you want to go to college? 1 = low, 5 = high, 6 = ref, 8 = DK
+    alcohol = H1TO12, # Ever had a drink more than 2 or 3 times? 0 = no, 1 = yes, 6 = refused, 8 = DK, 9 not applicable
+    grade_English = H1ED11, # 1 = A, 4 = D or lower, 5 = didn't take, 6 = not graded,
+        # 96 = refused, 97 legitimate skip, 98 DK
+    grade_math = H1ED12,
+    grade_history = H1ED13,
+    grade_science = H1ED14,
+    repeated_grade = H1ED5, # 0 = no, 1 = yes, 
+    suspended = H1ED7, # 0 never, 1 = yes
+    trouble_hw = H1ED17, #0 = never any trouble - 4 = every day trouble getting hw done
+    
+  )
+   
+ah4 <- ah4 %>% 
+    mutate(
+        ed_attainment = H4ED2, # 98 = DK 
+    )
+
+```
+
+```{r data-recoding, include = FALSE, eval = FALSE}
+
+## RECODE SPORTS VARIABLE:
+    # Recode each sport 0/1, sum sports, create sports_fct if sum of sports > 0. 
+
+ah1 <- ah1 %>%
+  mutate(
+    baseball_bin = case_when(      
+      baseball == '(0) (0) Not marked'  ~ 0,    
+      baseball == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_               # everything not assigned is NA
+      ),
+    basketball_bin = case_when(
+        basketball == '(0) (0) Not marked'  ~ 0,    
+        basketball == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        ),
+    field_hockey_bin = case_when(
+        field_hockey == '(0) (0) Not marked'  ~ 0,    
+        field_hockey == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        ),
+    football_bin = case_when(
+        football == '(0) (0) Not marked'  ~ 0,    
+        football == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        ),
+    ice_hockey_bin = case_when(
+        ice_hockey == '(0) (0) Not marked'  ~ 0,    
+        ice_hockey == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        ),
+    soccer_bin = case_when(
+        soccer == '(0) (0) Not marked'  ~ 0,    
+        soccer == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        ),
+    swimming_bin = case_when(
+        swimming == '(0) (0) Not marked'  ~ 0,    
+        swimming == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        ),
+    tennis_bin = case_when(
+        tennis == '(0) (0) Not marked'  ~ 0,    
+        tennis == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        ),
+    track_bin = case_when(
+        track == '(0) (0) Not marked'  ~ 0,    
+        track == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        ),
+    volleyball_bin = case_when(
+        volleyball == '(0) (0) Not marked'  ~ 0,    
+        volleyball == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        ),
+    wrestling_bin = case_when(
+        wrestling == '(0) (0) Not marked'  ~ 0,    
+        wrestling == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        ), 
+    other_sport_bin = case_when(
+        other_sport == '(0) (0) Not marked'  ~ 0,    
+        other_sport == '(1) (1) Marked' ~ 1,
+      TRUE ~ NA_real_  
+        )
+  )
+
+# Create column for sum of total number of sports
+ah1$sports_sum <- rowSums(subset(
+    ah1, 
+    select = c(baseball_bin, basketball_bin, field_hockey_bin, football_bin, 
+               ice_hockey_bin, soccer_bin, swimming_bin, tennis_bin, track_bin,
+               volleyball_bin, wrestling_bin, other_sport_bin), 
+    na.rm = TRUE))
+
+    # Check sports sum
+summary(ah1$sports_sum)
+
+# Create column for participation in any sport:
+ah1 <- ah1 %>% mutate(
+    sports_fct = case_when(
+        sports_sum == 0 ~ 0, 
+        sports_sum > 0 ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor()
+)
+    
+    # Check sports sum and sports factor: 
+ah1 %>% select(sports_sum, sports_fct)
+levels(ah1$sports_fct)
+str(ah1$sports_fct)
+
+## RECODE OTHER VARIABLES:
+
+ah1 <- ah1 %>% mutate(
+    # Sex:
+    male_fct = case_when(
+        sex == '(1) (1) Male' ~ 1, 
+        sex == '(2) (2) Female' ~ 0, 
+        TRUE ~ NA_real_) %>% as.factor(),
+   
+    # Race:
+    hispanic_fct = case_when(
+        hispanic == '(0) (0) No' ~ 0, 
+        hispanic == '(1) (1) Yes' ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(),
+    white_fct = case_when(
+        white == '(0) (0) Not marked' ~ 0, 
+        white == '(1) (1) Marked' ~ 1,
+        TRUE ~ NA_real_) %>% as.factor(),
+    black_fct = case_when(
+        black == '(0) (0) Not marked' ~ 0, 
+        black == '(1) (1) Marked' ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(), 
+    other_race_fct = case_when(
+        native_american == "(1) (1) Marked" | Asian_PI == "(1) (1) Marked (If Asian/Pacific Islander among R's answer ask Q" | other_race == "(1) (1) Marked" ~ 1, 
+        native_american == "(0) (0) Not marked" | Asian_PI == "(0) (0) Not marked (skip to Q.8)" | other_race == "(0) (0) Not marked" ~ 0, 
+        TRUE ~ NA_real_) %>% as.factor(),
+    race_fct = case_when(
+        hispanic_fct == 1 ~ "hispanic", 
+        white_fct == 1 ~ "white", 
+        black_fct == 1 ~ "black", 
+        other_race_fct == 1 ~ "other") %>% as.factor(),
+    race_fct = forcats::fct_relevel(race_fct, "white"),
+    
+     # Health:
+    health_num = case_when(
+        health == "(1) (1) Excellent" ~ 5, 
+        health == "(2) (2) Very good" ~ 4, 
+        health == "(3) (3) Good" ~ 3, 
+        health == "(4) (4) Fair" ~ 2, 
+        health == "(5) (5) Poor" ~ 1, 
+        TRUE ~ NA_real_) %>% as.numeric(),
+    
+    # Parents' Averaged Education Level: 
+    parent_response_ed_num = case_when(
+        parent_response_ed == "(10) (10) Never went to school" ~ 0,
+        parent_response_ed == "(01) (1) 8th grade or less" ~ 1, 
+        parent_response_ed == "(02) (2) >8th grade/didn't graduate high school" ~ 2, 
+        parent_response_ed == "(03) (3) Business/trade/voc. school instead high school" ~ 3,
+        parent_response_ed == "(04) (4) High school graduate" | 
+            parent_response_ed == "(05) (5) Completed a GED" ~ 4, 
+        parent_response_ed == "(06) (6) Business/trade/voc. school after high school" ~ 5, 
+        parent_response_ed == "(07) (7) College/didn't graduate" ~ 6, 
+        parent_response_ed == "(08) (8) Graduated from college/university" ~ 7,
+        parent_response_ed == "(09) (9) Prof training beyond 4-year college/univ" ~ 8,
+        TRUE ~ NA_real_) %>% as.numeric(),
+    parent_partner_ed_num = case_when(
+        parent_partner_ed == "(10) (10) Never went to school" ~ 0,
+        parent_partner_ed == "(01) (1) 8th grade or less" ~ 1, 
+        parent_partner_ed == "(02) (2) >8th grade/didn't graduate high school" ~ 2, 
+        parent_partner_ed == "(03) (3) Business/trade/voc. school instead high school" ~ 3,
+        parent_partner_ed == "(04) (4) High school graduate" |
+            parent_partner_ed == "(05) (5) Completed a GED" ~ 4,  
+        parent_partner_ed == "(06) (6) Business/trade/voc. school after high school" ~ 5,    
+        parent_partner_ed == "(07) (7) College/didn't graduate" ~ 6,    
+        parent_partner_ed == "(08) (8) Graduated from college/university" ~ 7,    
+        parent_partner_ed == "(09) (9) Prof training beyond 4-year college/univ" ~ 8,
+        TRUE ~ NA_real_) %>% as.numeric(),
+    res_mom_ed_num = case_when(
+        res_mom_ed == "(10) (10) She never went to school" ~ 0,
+        res_mom_ed == "(01) (1) 8th grade or less" ~ 1, 
+        res_mom_ed == "(02) (2) >8th grade/didn't graduate high school" ~ 2, 
+        res_mom_ed == "(03) (3) Business/trade/voc. school instead high school" ~ 3, 
+        res_mom_ed == "(04) (4) High school graduate" | res_mom_ed == "(05) (5) GED" ~ 4,
+        res_mom_ed == "(06) (6) Business/trade/voc. school after high school" ~ 5, 
+        res_mom_ed == "(07) (7) College/didn't graduate" ~ 6, 
+        res_mom_ed == "(08) (8) Graduated from college/university" ~ 7, 
+        res_mom_ed == "(09) (9) Prof training beyond 4-year college/university" ~ 8, 
+        TRUE ~ NA_real_) %>% as.numeric(), 
+    res_dad_ed_num = case_when(
+        res_dad_ed == "(10) (10) She never went to school" ~ 0,
+        res_dad_ed == "(01) (1) 8th grade or less" ~ 1, 
+        res_dad_ed == "(02) (2) >8th grade/didn't graduate high school" ~ 2, 
+        res_dad_ed == "(03) (3) Business/trade/voc. school instead high school" ~ 3, 
+        res_dad_ed == "(04) (4) High school graduate" | res_mom_ed == "(05) (5) GED" ~ 4,
+        res_dad_ed == "(06) (6) Business/trade/voc. school after high school" ~ 5, 
+        res_dad_ed == "(07) (7) College/didn't graduate" ~ 6, 
+        res_dad_ed == "(08) (8) Graduated from college/university" ~ 7, 
+        res_dad_ed == "(09) (9) Prof training beyond 4-year college/university" ~ 8, 
+        TRUE ~ NA_real_) %>% as.numeric(),
+    
+    # Income: 
+    income_num = case_when(
+        income <= 999 ~ income, # range, 9996 refused
+        TRUE ~ NA_real_) %>% as.numeric(),
+    # Make income a log income: 
+    log_income = case_when(
+        income_num == 0 ~ 0, 
+        income_num > 0 ~ log(income_num)),
+   # Variables that will help impute income later, but not used for analysis:     
+    pay_bills_fct = case_when(
+        pay_bills == "(0) (0) No" ~ 0, 
+        pay_bills == "(1) (1) Yes" ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(),
+    public_assistance_fct = case_when(
+        public_assistance == "(0) (0) No" ~ 0, 
+        public_assistance == "(1) (1) Yes" ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(), 
+    parent_employed_fct = case_when(
+        parent_employed == "(0) (0) No" ~ 0, 
+        parent_employed == "(1) (1) Yes" ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(), 
+    partner_employed_fct = case_when(
+        partner_employed == "(0) (0) No" ~ 0,
+        partner_employed == "(1) (1) Yes" ~ 1,
+        TRUE ~ NA_real_) %>% as.factor(), 
+    
+    # College aspirations:
+    aspirations_college_num = case_when(
+        aspirations_college <= 5 ~ aspirations_college, 
+        TRUE ~ NA_real_) %>% as.numeric(),
+    
+    # Alcohol consumption:
+    alcohol_bin = case_when( 
+        alcohol == "(0) (0) No (skip to Q.29)" ~ 0, 
+        alcohol == "(1) (1) Yes" ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(),
+    
+    # Estimated Academic Performance: 
+    grade_English_num = case_when(
+        grade_English == "(1) (1) A" ~ 4, 
+        grade_English == "(2) (2) B" ~ 3, 
+        grade_English == "(3) (3) C" ~ 2, 
+        grade_English == "(4) (4) D or lower" ~ 1,
+        TRUE ~ NA_real_) %>% as.numeric(), 
+    grade_math_num = case_when(
+        grade_math == "(1) (1) A" ~ 4, 
+        grade_math == "(2) (2) B" ~ 3, 
+        grade_math == "(3) (3) C" ~ 2, 
+        grade_math == "(4) (4) D or lower" ~ 1,
+        TRUE ~ NA_real_) %>% as.numeric(),
+    grade_history_num = case_when(
+        grade_history == "(1) (1) A" ~ 4, 
+        grade_history == "(2) (2) B" ~ 3, 
+        grade_history == "(3) (3) C" ~ 2, 
+        grade_history == "(4) (4) D or lower" ~ 1,
+        TRUE ~ NA_real_) %>% as.numeric(), 
+    grade_science_num = case_when(
+        grade_science == "(1) (1) A" ~ 4, 
+        grade_science == "(2) (2) B" ~ 3, 
+        grade_science == "(3) (3) C" ~ 2, 
+        grade_science == "(4) (4) D or lower" ~ 1,
+        TRUE ~ NA_real_) %>% as.numeric(), 
+    repeated_grade_fct = case_when(
+        repeated_grade == "(0) (0) No (skip to Q.7)" ~ 0, 
+        repeated_grade == "(1) (1) Yes" ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(), 
+    suspended_fct = case_when(
+        suspended == "(0) (0) No (skip to Q.9)" ~ 0, 
+        suspended == "(1) (1) Yes" ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(), 
+    trouble_hw_num = case_when(
+        trouble_hw == "(0) (0) Never" ~ 0, 
+        trouble_hw == "(1) (1) Just a few times" ~ 1, 
+        trouble_hw == "(2) (2) About once a week" ~ 2, 
+        trouble_hw == "(3) (3) Almost every day" ~ 3, 
+        trouble_hw == "(4) (4) Every day" ~ 4) %>% as.numeric()
+)
+
+
+# Turn parent and parents' partners' education into an average parents' ed:
+ah1$parent_ed_avg <- rowMeans(subset(
+    ah1, 
+    select = c(parent_response_ed_num, parent_partner_ed_num)), 
+    na.rm=TRUE)
+    
+    # Check parent average education:
+ah1 %>% dplyr::select(parent_response_ed_num, parent_partner_ed_num, parent_ed_avg) %>% head(n=30)
+
+    # turn NaN's into NA's:
+ah1$parent_ed_avg[is.nan(ah1$parent_ed_avg)] <- NA
+   
+# Turn res_parent education (reported by child) into an average: 
+ah1$res_parents_ed_avg <- rowMeans(subset(
+    ah1, 
+    select = c(res_dad_ed_num, res_mom_ed_num)), 
+    na.rm=TRUE) 
+
+ah1$res_parents_ed_avg[is.nan(ah1$res_parents_ed_avg)] <- NA
+
+# Turn grades into a GPA:
+ah1$gpa <- rowMeans(subset(
+    ah1, 
+    select = c(grade_math_num, grade_English_num, grade_history_num, grade_science_num)),
+    na.rm = TRUE)
+    
+    # Check gpa: 
+ah1 %>% select(grade_math_num, grade_English_num, grade_history_num, grade_science_num, gpa) %>% head(n=30)
+
+    # turn NaN's into NA's: 
+ah1$gpa[is.nan(ah1$gpa)] <- NA
+
+
+# Recode EDUCATIONAL ATTAINMENT (wave 4): 
+levels(ah4$ed_attainment)
+
+ah4 <- ah4 %>%
+  mutate(
+    ed_attainment_num = case_when(
+        ed_attainment == "(01) (1) 8th grade or less" ~ 1,
+        ed_attainment == "(02) (2) Some high school" ~ 2,
+        ed_attainment == "(03) (3) High school graduate" ~ 3,
+        ed_attainment == "(04) (4) Some vocational/technical training (after high school)" ~ 4,
+        ed_attainment == "(05) (5) Completed vocational/technical training (after high scho" ~ 5,
+        ed_attainment == "(06) (6) Some college" ~ 6,
+        ed_attainment == "(07) (7) Completed college (bachelor's degree)" ~ 7,
+        ed_attainment == "(12) (12) Some post baccalaureate professional education" ~ 8,
+        ed_attainment == "(13) (13) Completed post baccalaureate professional education" ~ 9,
+        ed_attainment == "(08) (8) Some graduate school" ~ 10,
+        ed_attainment == "(09) (9) Completed a master's degree" ~ 11,
+        ed_attainment == "(10) (10) Some graduate training beyond a master's degree" ~ 12,
+        ed_attainment == "(11) (11) Completed a doctoral degree" ~ 13, 
+        TRUE ~ NA_real_) %>% as.numeric(),
+  )
+ 
+    # check the recoding
+summary(ah4$ed_attainment_num)
+
+
+```
+
+```{r make-data-smaller, include=FALSE, eval=FALSE}
+# Keep only re-coded variables for imputation and analysis: 
+
+ah1_smaller <- ah1 %>%
+  select(AID, sports_fct, male_fct, race_fct, health_num, parent_ed_avg,
+         res_parents_ed_avg, log_income, pay_bills_fct, public_assistance_fct,
+         parent_employed_fct, partner_employed_fct, aspirations_college_num,
+         alcohol_bin, gpa, repeated_grade_fct, suspended_fct, trouble_hw_num)
+
+names(ah1_smaller)
+dim(ah1_smaller)
+head(ah1_smaller)
+
+ah4_smaller <- ah4 %>% 
+    select(AID, ed_attainment_num)
+
+head(ah4_smaller)
+
+```
+
+```{r merge-smaller-data, include = FALSE, eval = FALSE}
+# Merge smaller datasets together: 
+
+ahold <- merge(ah1_smaller, ah4_smaller, by.x = "AID", by.y = "AID")
+
+# How many NA for treatment? (sports): 
+naniar::miss_var_summary(ahold)
+
+## Remove rows with NA for treatment (sports): 
+
+ahnew <- ahold[!is.na(ahold$sports_fct), ]
+
+## Remove rows with NA for outcome (ed attainment):
+sum(is.na(ahnew$ed_attainment_num)) 
+
+ahnew <- ahnew[!is.na(ahnew$ed_attainment_num), ]
+
+```
+
+
+```{r save-data, include = FALSE, eval = FALSE}
+# Save: 
+saveRDS(ahnew, file = "ahnew.rds")
+```
+
+
+```{r load-scrubbed-data, include = FALSE}
+## FROM HERE ON, EVAL = TRUE
+
+ahnew <- readRDS("ahnew.rds")
+
+glimpse(ahnew)
+```
+
+
+```{r sub-parent-ed, include = FALSE}
+# Impute child's response for parent education where parent's response NA:
+ah_impute_parents <- ahnew %>% 
+    mutate(
+        parent_avg_ed_imputed = case_when(
+            is.na(parent_ed_avg) == FALSE ~ parent_ed_avg, 
+            is.na(parent_ed_avg) == TRUE ~ res_parents_ed_avg) 
+    )
+
+summary(ah_impute_parents$parent_avg_ed_imputed)
+
+    # Look at how many are now left missing: 
+naniar::miss_var_summary(ah_impute_parents) %>% filter(variable == "parent_avg_ed_imputed")
+
+```
+
+```{r impute-income, include = FALSE}
+
+# Impute Missingness with Amelia: 
+
+    # Turn subset into a dataframe: 
+ah_subset <- data.frame(ah_impute_parents %>% select(-c(res_parents_ed_avg, parent_ed_avg))) # remove parent ed variables used to make final parent ed variable.
+
+glimpse(ah_subset)
+
+# identify columns with bounds to include in bounds matrix of amelia: 
+match(c("log_income", "parent_avg_ed_imputed", "gpa", "aspirations_college_num", "health_num"), names(ah_subset)) # 6 18 13 11  5
+
+# Set up a matrix of bounds:
+bounds_matrix <- matrix(
+    ncol = 3, 
+    byrow = TRUE, 
+    data = c(6, 0, 999, 
+             18, 0, 8,
+             13, 0, 4,
+             11, 0, 5,
+             5, 0, 5)
+)
+
+    
+# IMPUTE with AMELIA: 
+ah_imputed <- amelia(
+    x = ah_subset, 
+    m = 1, 
+    idvars = c("AID", "partner_employed_fct", "parent_employed_fct", "pay_bills_fct", "public_assistance_fct", "trouble_hw_num", "suspended_fct", "repeated_grade_fct"), # don't impute on variables not keeping for analysis
+    noms = c("sports_fct", "male_fct", "race_fct", "alcohol_bin"),
+    bounds = bounds_matrix
+)
+
+
+ah_imputed <- ah_imputed$imputations$imp1
+
+# remove variables used for imputation, but not for future analysis: 
+ah_imputed <- ah_imputed %>% 
+    select(AID, sports_fct, ed_attainment_num, parent_avg_ed_imputed, 
+           log_income, male_fct, race_fct, health_num, aspirations_college_num,
+           alcohol_bin,gpa) 
+
+glimpse(ah_imputed)
+
+```
+
+
+```{r matches, include = FALSE}
+
+# nearest neighbor: 
+nn_out <- matchit(
+    formula = sports_fct ~ parent_avg_ed_imputed + log_income + male_fct + 
+        race_fct + health_num + aspirations_college_num + alcohol_bin + gpa, 
+    data = ah_imputed, 
+    method = "nearest", 
+    caliper = 0.01, 
+    replace = TRUE
+)
+
+summary(nn_out)
+
+# Mahalanobis:
+
+mahalanobis_out <- matchit(
+    formula = sports_fct ~ parent_avg_ed_imputed + log_income + male_fct + 
+        race_fct + health_num + aspirations_college_num + alcohol_bin + gpa, 
+    data = ah_imputed, 
+    method = "nearest", 
+    distance = "mahalanobis", 
+    replace = TRUE
+)
+
+summary(mahalanobis_out)
+
+# Subclassification: 
+
+subclass_out <- matchit(
+    formula = sports_fct ~ parent_avg_ed_imputed + log_income + male_fct + 
+        race_fct + health_num + aspirations_college_num + alcohol_bin + gpa, 
+    data = ah_imputed, 
+    method = "subclass"
+)
+
+summary(subclass_out)
+
+# CBPS matching: 
+
+cbps_out <- CBPS::CBPS(
+    formula = sports_fct ~ parent_avg_ed_imputed + log_income + male_fct + 
+        race_fct + health_num + aspirations_college_num + alcohol_bin + gpa, 
+    data = ah_imputed)
+
+# assign weights to ah_imputed data
+ah_imputed$cbps_weights <- cbps_out$weights
+
+# look at balance: 
+CBPS::balance(cbps_out)
+
+```
+
+```{r label-data, include=FALSE, eval = FALSE}
+
+# Label data for codebook: 
+
+ah_codebook <- ah_imputed %>% mutate(
+    sports_fct = set_label(sports_fct, label = c("Sports Participation")),
+    male_fct = set_label(male_fct, label = c("Sex")),
+    race_fct = set_label(race_fct, label = c("Race")), 
+    ed_attainment_num = set_label(ed_attainment_num, label = c("Educational Attainment")), 
+    parent_avg_ed_imputed = set_label(parent_avg_ed_imputed, label = c("Parents' Education (Averaged)")),
+    log_income = set_label(log_income, label = c("Log (Income in thousands)")), 
+    health_num = set_label(health_num, label = c("Health, 1 (poor) to 5 (excellent)")), 
+    aspirations_college_num = set_label(aspirations_college_num, label = c("Desire to go to College, 1 (low) to 5 (high)")), 
+    alcohol_bin = set_label(alcohol_bin, label = c("Alcohol Use")), 
+    gpa = set_label(gpa, label = c("Averaged Recent Grades (GPA)"))
+)
+                                      
+levels(ah_codebook$sports_fct) <- list("No" = 0, "Yes"= 1)
+levels(ah_codebook$male_fct) <- list("Female" = 0, "Male"= 1)
+levels(ah_codebook$alcohol_bin) <- list("No" = 0, "Yes"= 1)
+
+```
+
+```{r make-codebook, include=FALSE, eval=FALSE}
+
+# Make a codebook with final dataset, "ah_imputed". 
+dataReporter::makeCodebook(ah_codebook)
+```
+
+
+```{r remove-data, include = FALSE, eval = FALSE}
+
+# remove original loaded data
+rm(da21600.0001)
+rm(da21600.0022)
+
+# remove other larger data sets to free up memory
+rm(ah1) 
+rm(ah4)
+
+```
+
+```{r pre-matchsummary-stats, include=FALSE}
+
+## SUMMARY STATISTICS BEFORE MATCHING: 
+
+# remove labels for tableby: 
+ah_for_table <- remove_all_labels(ah_imputed)
+
+# Get summary stats by sports_fct, before matching: 
+tab1 <- arsenal::tableby(sports_fct ~ log_income + 
+                             parent_avg_ed_imputed + gpa + 
+                             aspirations_college_num + health_num + 
+                             male_fct + race_fct + 
+                             alcohol_bin + 
+                             ed_attainment_num, 
+                         test = FALSE,
+                         data = ah_for_table,
+                         digits = 2, 
+                         numeric.stats = c("meansd"),
+                         numeric.simplify = TRUE) %>%
+    summary(removeBlanks = TRUE)
+
+# Save as a dataframe:
+sumstats_before_matching <- as.data.frame(tab1)
+
+# Save new first column of names: 
+sumstats_before_matching[ ,1] <- c("Log Income", "Parent Ed.", "GPA", 
+                                   "Desire College", "Health", "Sex", "Female", "Male", 
+                                   "Race", "White", "Black", "Hispanic", "Other", 
+                                   "Alcohol Use", "No", "Yes", "Ed. Attainment")
+colnames(sumstats_before_matching) <- c("", "No Sports (N = 1632)", "Sports (N=2164)", "Total (N=3796)")
+
+
+
+```
+
+```{r summary-stats-after-match, include=FALSE}
+
+## SUMMARY STATISTICS AFTER MATCHING:
+
+# remove underscores from names for tableby: 
+ahtable <- ah_imputed %>% mutate(
+    sports = sports_fct, 
+    ed = ed_attainment_num, 
+    parent = parent_avg_ed_imputed, 
+    income = log_income, 
+    male = male_fct, 
+    race = race_fct, 
+    health = health_num, 
+    college = aspirations_college_num, 
+    alcohol = alcohol_bin, 
+    gpa = gpa, 
+    weights = cbps_weights
+) %>% 
+    dplyr::select(sports, income, parent, gpa, college, health, male, race, alcohol, ed, weights)
+
+ahtable <- remove_all_labels(ahtable)
+
+
+# After matching:
+tab2 <- arsenal::tableby(sports ~ income + parent + gpa + college + health + 
+                        male + race + alcohol + ed, 
+                 data = ahtable, 
+                 weights = weights, 
+                 total = FALSE, 
+                 numeric.stats = c("meansd"), 
+                 numeric.simplify = TRUE) %>% 
+    summary(removeBlanks = TRUE) 
+
+
+# save as data frame: 
+sumstats_after_matching <- as.data.frame(tab2)
+
+# Save new first column of names: 
+sumstats_after_matching[ ,1] <- c("Log Income", "Parent Ed.", "GPA", 
+                                   "Desire College", "Health", "Sex", "Female", "Male", 
+                                   "Race", "White", "Black", "Hispanic", "Other", 
+                                   "Alcohol Use", "No", "Yes", "Ed. Attainment")
+colnames(sumstats_after_matching) <- c("", "No Sports", "Sports")
+
+
+```
+
+```{r combine-sumstats, include= FALSE}
+# Combine before and after summary statistics tablebys to make one table: 
+
+sumstats_all <- inner_join(sumstats_before_matching, sumstats_after_matching, by = "")
+sumstats_all
+```
+
+```{r sumstats-table, echo = FALSE, results = "asis"}
+# Pipe combined summary statistics into Kable: 
+
+ kableExtra::kable(
+   sumstats_all, 
+   format="latex", 
+   caption = "Summary Statistics Before and After Matching", 
+   booktabs = TRUE
+ ) %>% 
+  add_indent(positions = c(7,8,10,11,12,13,15,16)) %>%
+  add_header_above(c("", "Unmatched" = 3, "Matched" = 2)) %>% 
+  kable_styling(full_width=FALSE, font_size= 8)
+```
+
+
+## 4 Methods
+
+We ran multiple regression using CBPS weights. CBPS weights approximate random sampling by ensuring that treated and control groups will be close to balanced on observed pre-treatment covariates. Multiple regression was appropriate because we wanted to investigate whether participating in sports was associated with later educational attainment alone and while holding a variety of other variables constant. Some of the assumptions of linear regression may be violated, but the violations were not extreme enough to merit transforming any variable beyond income (which was logged) (see Appendix for diagnostic plots). The residuals vs. fitted values plot shows the linearity assumption is close enough to being met that we proceed as if it is met. A histogram of the residuals shows nearly normal distribution, with a slight skew right, but it is moderate enough that we proceed as if the normality assumption is met. The scale-location plot and histograms of the variables show that the equal variance assumption may be violated, but none of the variables merit transformation, so we proceed as if the equal variance assumption is met. While there are several outliers with influential values, investigation showed these were not due to coding errors so they were retained (all were respondents who achieved PhD's or were PhD candidates in wave 4, but whose parents had less education). Finally, the independence assumption may not be met because the survey included siblings, so there is a possibility that some observations influenced others. However, since the schools where the surveys were conducted were randomly drawn from the entire United States, and from various types of schools (public, private, charter), major clustering problems based on geography are unlikely to be a problem.
+
+A preferred model was selected by adding control variables to the simple bivariate model one at a time and using ANOVA to assess the improvement in explanatory power balanced with parsimony using the F-statistic (see Appendix for ANOVA tables). Using this method, the preferred model is:
+
+$$
+\begin{split}
+\widehat{Educational\ Attainment} = \alpha + \beta_{1}(\operatorname{sports_{1=yes}}) + \beta_{2}(\operatorname{gpa}) + \beta_{3}(\operatorname{parents\; education}) + \\ \beta_{4}(\operatorname{college\; aspirations}) + 
+\beta_{5}(\operatorname{health}) + \beta_{6}(\operatorname{log\; income}) + \beta_{7}(\operatorname{male})  + \epsilon
+\end{split}
+$$
+Where the coefficients are:
+
+$$
+\begin{split}
+\operatorname{\widehat{Educational\ Attainment}} = -2.35 + 0.04(\operatorname{sports_{1=yes}}) + 1.07(\operatorname{gpa}) + 0.36(\operatorname{parents\; education}) + \\
+0.42(\operatorname{college\; aspirations}) + 0.2(\operatorname{health}) + 0.27(\operatorname{log\; income}) - 0.34(\operatorname{male})
+\end{split}
+$$
+
+## 5 Results
+```{r set-labels, include=FALSE}
+# label data for model plot axis ticks later
+
+ah_imputed <- ah_imputed %>% 
+    mutate(
+        sports_fct = sjlabelled::set_labels(sports_fct, labels = c("No", "Yes")), 
+        male_fct = sjlabelled::set_labels(male_fct, labels = c("Female", "Male"))
+    )
+
+```
+
+```{r linear-models, include=FALSE}
+
+# Simple Bivariate model: 
+mod1 <- lm(ed_attainment_num ~ sports_fct, 
+           weights = cbps_weights, 
+           data = ah_imputed)
+
+mod2 <- lm(ed_attainment_num ~ sports_fct + gpa, 
+           weights = cbps_weights, 
+           data = ah_imputed)
+
+mod3 <- lm(ed_attainment_num ~ sports_fct + gpa + parent_avg_ed_imputed, 
+           weights = cbps_weights, 
+           data = ah_imputed)
+
+mod4 <- lm(ed_attainment_num ~ sports_fct + gpa + parent_avg_ed_imputed + 
+               aspirations_college_num, 
+           weights = cbps_weights, 
+           data = ah_imputed)
+
+mod5 <- lm(ed_attainment_num ~ sports_fct + gpa + parent_avg_ed_imputed + 
+               aspirations_college_num + health_num, 
+           weights = cbps_weights, 
+           data = ah_imputed)
+
+mod6 <- lm(ed_attainment_num ~ sports_fct + gpa + parent_avg_ed_imputed + 
+               aspirations_college_num + health_num + log_income, 
+           weights = cbps_weights, 
+           data = ah_imputed)
+
+mod7 <- lm(ed_attainment_num ~ sports_fct + gpa + parent_avg_ed_imputed + 
+               aspirations_college_num + health_num + log_income + male_fct,
+           weights = cbps_weights, 
+           data = ah_imputed)
+
+mod8 <- lm(ed_attainment_num ~ sports_fct + gpa + parent_avg_ed_imputed + 
+               aspirations_college_num + health_num + log_income + male_fct +
+               race_fct,
+           weights = cbps_weights, 
+           data = ah_imputed)
+
+mod9 <- lm(ed_attainment_num ~ sports_fct + gpa + parent_avg_ed_imputed + 
+               aspirations_college_num + health_num + log_income + male_fct +
+               alcohol_bin,
+           weights = cbps_weights, 
+           data = ah_imputed)
+
+lm_cbps <- lm(ed_attainment_num ~ sports_fct + parent_avg_ed_imputed + race_fct + 
+                alcohol_bin + log_income + health_num + gpa + male_fct + 
+                aspirations_college_num, 
+              weights = cbps_weights, 
+              data = ah_imputed)
+
+```
+
+
+```{r stargazer-models, echo=FALSE, results = "asis"}
+## Regression TABLE:
+
+stargazer_labels <- c("Sports: Yes", "Grades (wave 1)", "Parent Education", 
+                      "Race: Black", "Race: Hispanic", "Race: Other", 
+                      "Alcohol: yes", "College Aspirations", "Health", 
+                      "Income (log)", "Sex: Male", "Constant")
+                      
+stargazer(mod1, mod7, lm_cbps, 
+          font.size = "footnotesize", 
+          title = "Models for Association between Educational Attainment and Sports Participation", 
+          omit.stat = c("f", "ser"), 
+          type = "latex", 
+          header = FALSE, 
+          single.row=TRUE,
+          no.space=TRUE,
+          covariate.labels=stargazer_labels, 
+          dep.var.labels= "Educational Attainment")
+
+```
+
+Using linear regression, we find no evidence for an association between participation in sports and educational attainment. As **Table 2** shows, this finding is robust across all three models presented here. It is also robust with all four matching methods presented above (see Appendix, Table 7). When sports participation is the only explanatory variable (model 1), it is associated with 0.043 unit increase in educational attainment as compared to not playing sports. This estimate is near zero, and based on how educational attainment was coded, this represents less than the difference between some schooling at any level and graduation at that level, which would be a one-unit increase. The p-value for this estimate is greater than 0.1, indicating that we cannot reject the null hypothesis that sports participation has no association with educational attainment. 
+
+In the preferred model (model 2), when recent grades, parents' mean educational attainment, the respondent's college aspirations, health, income, and sex are held constant, there is also no association between sports participation and educational attainment. In this model, playing sports is associated with an estimated increase in educational attainment of 0.042 units when holding these other variables constant, which, like model 1, is near zero. This estimate has a p-value greater than 0.1, so we cannot reject the null hypothesis that there is no association between sports participation and educational attainment, holding these other variables constant. The full model (model 3), which adds controls for race and alcohol use, has the same estimate with the same p-value for the association between sports and educational attainment as model 2. However, in the preferred model (model 2) and the full model (model 3), many other variables _are_ statistically significantly associated with educational attainment, when holding sports participation constant. In model 2, holding sports and the other variables constant, each unit increase in recent grades is associated with a 1.067 increase in educational attainment (p-value less than 0.01); each unit increase in parents' mean education level is associated with a 0.362 unit increase in educational attainment (p-value less than 0.01); each unit increase in desire to go to college is associated with a 0.418 unit increase in educational attainment (p-value less than 0.01); each unit increase in reported health is associated with a 0.198 unit increase in educational attainment (p-value less than 0.01); a doubling of income is associated with a 0.189 ($0.273*log(2)$) unit increase in educational attainment (p-value less than 0.01); and being male is associated with a 0.342 unit _decrease_ in educational attainment as compared to being female (p-value less than 0.01). Note that recent grades have the biggest estimated effect on educational attainment, and that all the above control variables are estimated to increase educational attainment except for male sex, holding sports participation constant. In the full model, the estimated associations between these control variables and educational attainment are similar; alcohol use is not statistically significantly associated with educational attainment holding sports and other factors constant; and only Hispanic race is statistically significantly associated with educational attainment, with an estimated 0.267 unit increase in education as compared to the White group (p-value less than 0.05), holding other variables constant. 
+
+Taking these results together, the substantive interpretation is that, both in magnitude of the estimated association and in the statistical significance of the estimate, there is no evidence for an association between sports participation and educational attainment; and other factors such as recent grades, parents' education levels, college aspirations, health, income, and sex explain educational attainment better than sports participation. 
+
+Plot A shows the association between sports participation and educational attainment. The bars for sports and non-sports overlap substantially, indicating little association. Plot B shows educational attainment by sports participation and sex, showing how males have lower estimated educational attainment than females. Plot C and D show how variables other than sex (here, parents' education and income) are positively associated with educational attainment, though sports participation has little association with education, as the lines for sports and non-sports overlap substantially. 
+
+```{r prep-plots, include=FALSE}
+set_theme(
+    title.size = 0.9, 
+    axis.title.size= 0.9, 
+    legend.title.size=0.7
+    )
+
+plot_bivariate <- sjPlot::plot_model(
+    model = mod7, 
+    type = "pred", 
+    terms = c("sports_fct")
+) +
+    ggtitle("Educational Attainment vs. \nSports Participation")+
+    labs(y = "Educational Attainment", 
+         x = "Sports Participation") 
+
+plot_parents <- sjPlot::plot_model(
+    model = mod7, 
+    type = "pred", 
+    terms = c("parent_avg_ed_imputed", "sports_fct")
+) +
+    labs(title = "Educational Attainment vs. \nSports Participation, \nby Parents\' Average Education",
+        y = "Educational Attainment",
+        x = "Parents\'s Mean Education", 
+        color = "Sports")
+
+plot_income <- sjPlot::plot_model(
+    model = mod7, 
+    type = "pred", 
+    terms = c("log_income", "sports_fct")
+) +
+    labs(title = "Educational Attainment vs. \nSports Participation, by log(Income)",
+        y = "Educational Attainment",
+        x = "Log(Income)", 
+        color = "Sports")
+
+plot_sex <- sjPlot::plot_model(
+    model = mod7, 
+    type = "pred", 
+    terms = c("male_fct", "sports_fct")
+) +
+    labs(title = "Educational Attainment vs. \nSports Participation, by Sex",
+         y = "Educational Attainment", 
+         x = "Sex", 
+         color = "Sports")
+
+```
+
+```{r cowplot_models, echo=FALSE}
+
+cowplot::plot_grid(
+    plot_bivariate, plot_sex, plot_parents, plot_income,
+    ncol = 2, 
+    labels = "AUTO"
+)
+```
+
+## 6 Discussion
+
+There are several limitations to this study. First, self-reported answers may not reflect the true answers to the questions. Students may report greater desire to go to college than they feel to please the interviewer, for example, and self-reported participation in sports is less accurate than a team roster would be (which was not available for this study). Second, missing data, especially for sports participation and income, may have biased the results in unknown ways. Third, estimated average grades at time of interview is not exactly a "baseline" for the child's academic performance before the "treatment" of sports, as they may have been participating in sports before reporting their grades. Future studies could use transcripts to get accurate GPA's before and after students signed up for organized sports. Fourth, this report only looked at the effect of any participation in sports during Wave 1 on educational attainment (the question was not repeated in later waves), which misses subjects who signed up for sports later in high school. Furthermore, it is likely that _more_ sports participation would have a different effect from _less_ participation, and the simple binary coding here may fail to detect this effect. Future research could look at whether _more hours_ spent playing sports and/or _more years_ spent involved in sports during high school is associated with educational attainment. Fifth, it may be that colleges preferentially admit students who play sports, so that participation is not directly effecting academic performance, but rather effecting admissions. One way to address this issue would be to study academic performance and higher educational achievement only among those admitted to college.
+
+Finally, we cannot say that the associations (or lack there of) between the explanatory variables and educational attainment were causal. Though the matching procedure mimics random sampling by creating treatment and control groups that are balanced on the observed variables, and therefore gets us closer to being able to infer causality, it is still possible that the two groups were unbalanced on unobserved variables which could act as confounders, predisposing subjects to both their educational attainment level and their status in any of the observed variables in this study. Since the subjects were drawn from a representative sample of middle and high schools around the United States, the results are generalizable to U.S. adolescents between 7th and 12th grades in 1994-5, who were 25-32 in 2008-9. 
+
+## 7 Conclusion
+
+We find no evidence for an association between participating in school sports in Wave 1 with educational attainment in Wave 4. The estimated association between sports participation and educational attainment was near zero and the estimate was not statistically significant, whether sports participation was the only explanatory variable or if other factors were held constant. In the preferred model, however, when sports participation was held constant, recent grades, income, parents' (mean) educational level, the student's college aspirations, health, and sex _were_ statistically significantly associated with educational attainment at Wave 4. Higher grades, income, parental education, college aspirations, and health rating were all associated with higher educational attainment, while male sex was associated with lower estimated educational attainment compared to female sex. These results held for the full model as well, where the added variable of alcohol use was not found to have a statistically significant association with educational attainment, and only Hispanic race was found to be statistically significantly associated with increased educational attainment compared to White race. The finding of no association between sports and educational attainment held for models run with all four matching methods. These results undermine the hypothesis that sports participation improves educational attainment and support the hypothesis that sports participation has no effect on educational attainment. While the data were matched to obtain treatment (sports) and control (non-sports) groups that were similar on all the observed variables, which mimics random sampling and brings us closer to inferring causality (or lack thereof) of sports participation on educational attainment, we still cannot say definitively that the relationship was causal, as there may be unobserved characteristics that were not evenly distributed between the treatment and control group which may have driven the results. 
+
+\newpage
+## 8 Bibliography
+
+**Data**: 
+
+
+* Harris, Kathleen Mullan, and Udry, J. Richard. National Longitudinal Study of Adolescent to Adult Health (Add Health), 1994-2008 [Public Use]. Carolina Population Center, University of North Carolina-Chapel Hill [distributor], Inter-university Consortium for Political and Social Research [distributor], 2018-08-06. https://doi.org/10.3886/ICPSR21600.v21
+
+**Software**:
+
+* Dahl, David B., David Scott, Charles Roosen, Arni Magnusson and Jonathan Swinton.
+  (2019). xtable: Export Tables to LaTeX or HTML. R package version 1.8-4.
+  https://CRAN.R-project.org/package=xtable
+  
+* Fong, Christian, Marc Ratkovic and Kosuke Imai. (2021). CBPS: Covariate Balancing
+Propensity Score. R package version 0.22. https://CRAN.R-project.org/package=CBPS
+ 
+ * Greifer, Noah. (2020). cobalt: Covariate Balance Tables and Plots. R package
+version 4.2.4. https://CRAN.R-project.org/package=cobalt
+
+* Hlavac, Marek. (2018). stargazer: Well-Formatted Regression and Summary Statistics Tables. R package version 5.2.1. https://CRAN.R-project.org/package=stargazer
+  
+* Honaker, J., King, G., Blackwell, M. (2011). “Amelia II: A Program for Missing Data.” Journal of Statistical Software, 45(7), 1–47. http://www.jstatsoft.org/v45/i07/.
+
+* Lüdecke, D (2021). _sjPlot: Data Visualization for Statistics in Social Science_. R
+package version 2.8.7, <URL: https://CRAN.R-project.org/package=sjPlot>.
+
+
+**Scholarly References**:
+
+* Barron, John M., Bradley T. Ewing, and Glen R. Waddell. 2000. "The Effects of High School Athletic Participation on Education and Labor Market Outcomes." _The Review of Economics and Statistics_ 82, no. 3:409-421. 
+
+* Daley, Amanda J., and Jason Ryan. 2000. "Academic Performance and Participation in Physical Activity by Secondary School Adolescents." _Perceptual and Motor Skills_, 91: 531-534. 
+
+* Eide, Eric R., and Nick Ronan. 2001. "Is participation in high school athletics an investmnet or a consumption good?: Evidence from high school and beyond." _Economics of Education Review_, 20, no.5: 431-442. 
+
+* Fox, Claudia K., Daheia Barr-Anderson, Dianne Neumark-Sztainer, and Melanie Wall. 2009. "Physical Activity and Sports Team Participation: Associations with Academic Outcomes in Middle School and High School Students." _Journal of School Health_ 80, no. 1:31-37. 
+
+* Marsh, Herbert W. 1993. "The Effects of Participation in Sport During the Last Two Years of High School." _Sociology of Sport Journal_ 10, no. 1:13-43. 
+
+* Mays, Darren, Lara DePadilla, Nancy J. Thompson, Howard I. Kushner, and  Michael Windle. 2010. "Sports Participation and Problem Alcohol Use: A Multi-Wave National Sample of Adolescents." _Americna Journal of Preventive Medicine_ 38, no. 5: 491-498. 
+
+* Rees, Daniel I., and Joseph J. Sabia. 2010. "Sports participation and academic performance: Evidence from the National Longitudinal Study of Adolescent Health." _Economics of Education Review_ 29, no. 5:751-759. 
+
+* Turner, Cory. 2020. "A Looming Financial Meltdown for America's Schools," _National Public Radio_, May 26. 
+
+\newpage
+
+## Appendix: Education Variables
+
+```{r variables, include= FALSE}
+value_ed_attain <- c(1:13)
+label_ed_attain <- c("8th grade or less", "Some high school", "High school graduate", "Some vocational/techincal training (after high school)", "Completed vocational/technical training (after high school)", "Some college", "Completed college", "Some post baccalaureate professional education", "Completed post baccalaureate professional education", "Some graduate School", "Completed a master's degree", "Some graduate training beyond a master's degree", "Completed a doctoral degree") 
+
+ed_attain_variable <- data.frame("label" = label_ed_attain, "value" = value_ed_attain)
+
+value_parent <- 0:8
+label_parent <- c("Never went to school", "8th grade or less", ">8th grade/didn't graduate high school", "Business/trade/voc. school instead high school", "High school graduate or completed GED", "Business/trade/voc. school after high school", "College/didn't graduate", "Graduated from college/university", "Prof training beyond 4-year college/univ")
+
+parent_ed_variable <- data.frame("label" = label_parent, "value" = value_parent)
+
+```
+
+
+```{r variables-table, echo=FALSE, results = "asis"}
+ed_attain_variable %>% 
+    xtable(caption  = "Respondent's Educational Attainment at Wave 4") %>%
+    print(type = "latex", 
+          table.placement = "!h", 
+          include.rownames = FALSE 
+          )
+```
+
+
+```{r variables-table-2, echo=FALSE, results = "asis"}
+parent_ed_variable %>% 
+    xtable(caption = "Parent's Educational Attainment") %>% 
+    print(type = "latex", 
+          table.placement = "!h", 
+          include.rownames = FALSE
+          )
+```
+
+## Appendix: Missingness and Imputation. 
+
+1. Missingness before any imputation: 
+
+```{r missingness-before-any-imputatin, echo=FALSE, fig.cap = "Missingness before imputation.", out.width="70%"}
+
+naniar::gg_miss_var(subset(ahnew, select = c(sports_fct, male_fct, race_fct, health_num, parent_ed_avg, log_income, alcohol_bin, gpa, ed_attainment_num)))
+
+```
+
+```{r table-missing-before-imputation, echo = FALSE, results = "asis"}
+naniar::miss_var_summary(subset(ahnew, select = c(sports_fct, male_fct, race_fct, health_num, parent_ed_avg, log_income, alcohol_bin, gpa, ed_attainment_num))) %>% 
+    xtable(caption = "Missingness before imputation") %>% 
+    print(type = "latex", 
+          table.placement = "!h") 
+```
+
+2. Imputing parents' average education: 
+
+Childrens' reports of their resident parents' (averaged) education were similar to the parents' self-reports, so the childrens' reported level of parents' education was used to impute missing data in the parents' answers. This method left only 37 entries, or 0.975%, with missing data to be imputed with amelia. 
+
+
+
+```{r missing-education-appendix, echo = FALSE, out.height= "40%"}
+## MISSING PARENT EDUCATION - CAN CHILD'S REPORT SUBSTITUTE?
+
+plot_ed1 <- ggplot(ah_impute_parents)+
+    aes(y = parent_ed_avg)+
+    geom_boxplot()+
+    labs(title = "Parents Reported Education Level \n(Averaged)", 
+         y = "Education Level")
+
+plot_ed2 <- ggplot(ah_impute_parents)+
+    aes(y = res_parents_ed_avg)+
+    geom_boxplot() +
+    labs(title = "Child's Reported Education Level \nof Parents (Averaged)", 
+         y = "Education Level")
+
+cowplot::plot_grid(plot_ed1, plot_ed2)
+```
+
+3. Missing income distribution: 
+
+After removing missing sports participation data and imputing missing parental education data with the adolescents' responses, the variable with the most missing data was income, with 831 entries, or 21.9% missing; followed by gpa, with 71, or 1.87% missing. 
+
+Missing income was not random, as entries with missing income had lower rates of receiving public assistance and were more likely to be able to pay their bills than entries without missing income. Among those with missing income data, 3.9% couldn't afford to pay their bills, while among those without missing income data, 14.0% couldn't afford to pay their bills. Among those with missing income, 3.9% were on public assistance, while among those without missing income, 6.3% were on public assistance. These numbers suggested that missing income may not be random, and so it was imputed. 
+
+```{r look-for-missingness, include = FALSE}
+
+## MISSING INCOME: RANDOM?
+
+# pay bills? 
+pay_fills <- ah_impute_parents %>% 
+    filter(is.na(log_income)) %>% 
+    pull(pay_bills_fct)
+
+length(pay_fills[!is.na(pay_fills)]) # pay_bills adds 368 rows that were missing in income_num.  
+
+ah_impute_parents %>% 
+    filter(is.na(log_income)) %>% 
+    pull(pay_bills_fct) %>% 
+    summary() # 49 no, 319 yes, 463 na =  0.05897 can't pay bills. 
+
+summary(ah_impute_parents$pay_bills) # 530 no, 2742 yes, 524 na = 0.13962 can't pay. 
+
+# Public assistance: 
+pub_assist_fills <- ah_impute_parents %>% 
+    filter(is.na(log_income)) %>% 
+    pull(public_assistance_fct)
+
+length(pub_assist_fills[!is.na(pub_assist_fills)]) # adds 388
+
+ah_impute_parents %>% 
+    filter(is.na(log_income)) %>% 
+    pull(public_assistance_fct) %>% 
+    summary() #356 no, 32 yes, 443 NA's = 0.039 yes rate
+
+summary(ah_impute_parents$public_assistance_fct) # 3097 no, 240 yes, 459 NA = 459 = 0.0632 yes rate 
+
+
+```
+
+
+4. Imputation with amelia: 
+
+Income and grades were imputed using the amelia package, and by including several extra variables that were not included as part of the analysis, but that likely predict income and grades. For income, these were: whether the parent responded that they could pay all their bills, whether they received public assistance, and whether the parent and the parent's partner were employed full-time; and for grades, these were: whether the student reported repeating a grade, being suspended, and having trouble completing homework. After imputation, there was no missing data. 
+
+```{r final-missingness, echo=FALSE, fig.cap = "Missingness after imputation", out.width="70%"}
+
+# look at missingness with imputed data - no longer any missingness: 
+ 
+naniar::gg_miss_var(ah_imputed)
+
+```
+
+```{r final-missingness-table, echo=FALSE, results = "asis"}
+
+naniar::miss_var_summary(ah_imputed) %>% 
+    xtable(caption = "Missingness after Imputation with Amelia") %>%
+    print(type = "latex", 
+          table.placement = "!h")
+
+```
+
+## Appendix: Matching Data
+Several variables did not exhibit overlap in the treatment and control group. 
+```{r plots-prep-data-appendix, echo= FALSE}
+# to plot log(income), need to replace income = 0 with 1,
+# (32 income = 0's, 3 income = 1's). 
+
+
+plot_income <- ggplot(ah_imputed, aes(x = log_income, color = sports_fct))+ 
+    geom_density()+
+    labs(title = "Sports Participation by Log Income", 
+         x = "Log Income (scaled)", 
+         y = "Density", 
+         color = "Sports") +
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          axis.title.x = element_text(size = 10), 
+          axis.title.y = element_text(size = 10))
+
+plot_parent_ed <- ggplot(ah_imputed, aes(x = parent_avg_ed_imputed, color = sports_fct))+
+    geom_density()+
+    labs(title = "Sports Participation by Parent Education", 
+         x= "Parents' Average Education", 
+         color = "Sports")+
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          axis.title.x = element_text(size = 10), 
+          axis.title.y = element_text(size = 10))
+
+plot_gpa <- ggplot(ah_imputed, aes(x = gpa, color = sports_fct))+
+    geom_density()+
+    labs(title = "Sports Participation by GPA", 
+         x = "GPA", 
+         y = "Density", 
+         color = "Sports")+
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          axis.title.x = element_text(size = 10), 
+          axis.title.y = element_text(size = 10))
+
+plot_aspiration <- ggplot(ah_imputed, aes(x = aspirations_college_num,
+                                          fill = sports_fct))+
+    geom_histogram(position = "dodge")+ 
+    labs(title = "Sports Participation by \nCollege Aspiration (Increasing)", 
+         x = "College Aspiration (Increasing)", 
+         fill = "Sports")+
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          axis.title.x = element_text(size = 10), 
+          axis.title.y = element_text(size = 10))
+
+plot_health <- ggplot(ah_imputed, aes(x = health_num, fill = sports_fct))+
+    geom_histogram(position = "dodge")+ 
+    labs(title = "Sports Participation by Health \n(Increasing)", 
+         x = "",
+         fill = "Sports")+
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          axis.title.x = element_text(size = 10), 
+          axis.title.y = element_text(size = 10))
+
+plot_sex <- ggplot(ah_imputed, aes(x = male_fct, fill = sports_fct))+
+    geom_bar(position = "dodge")+ 
+    labs(title = "Sports Participation by Sex", 
+         x = "Sex", 
+         fill = "Sports")+
+    scale_x_discrete(labels = c("Female", "Male"))+
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          axis.title.x = element_text(size = 10), 
+          axis.title.y = element_text(size = 10))
+
+plot_race <- ggplot(ah_imputed, aes(x = sports_fct, fill = race_fct))+
+    geom_bar(position = "fill")+
+    labs(title = "Sports Participation by Race", 
+         x = "Sports Participation")+
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          axis.title.x = element_text(size = 10), 
+          axis.title.y = element_text(size = 10))
+
+plot_ed_attainment <- ggplot(ah_imputed, aes(x = ed_attainment_num, 
+                                     color = sports_fct))+
+    geom_density()+ 
+    labs(title = "Sports Participation by \nEducational Attainment", 
+         x = "Educational Attainment (scaled)", 
+         y = "Density", 
+         color = "Sports")+
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          axis.title.x = element_text(size = 10), 
+          axis.title.y = element_text(size = 10))
+
+plot_alcohol <- ggplot(ah_imputed, aes(x = alcohol_bin, fill = sports_fct))+
+    geom_bar(position = "fill") + 
+    labs(title = "Alcohol Consumption by Sport Participation", 
+         x= "Alcohol",
+         fill = "Sports")+
+    scale_x_discrete(labels = c("No", "Yes"))+
+    theme(plot.title = element_text(size = 15, face = "bold"), 
+          axis.title.x = element_text(size = 10), 
+          axis.title.y = element_text(size = 10))
+        
+
+```
+
+```{r data-cow-plots-appendix, echo = FALSE, out.width="50%"}
+
+plot_income
+plot_parent_ed
+
+plot_gpa
+plot_aspiration
+
+
+plot_health
+plot_sex
+
+plot_race
+plot_alcohol
+
+```
+
+
+### Plots of covariates with four methods of matching: 
+
+
+```{r near-neighbor-plot, echo = FALSE}
+
+new.names <- c(parent_avg_ed_imputed = "Parents' Average Eduation", 
+               log_income = "Log Income", 
+               male_fct = "Sex: Male", 
+               race_fct_white = "Race: white", 
+               race_fct_black = "Race: black", 
+               race_fct_hispanic = "Race: hispanic", 
+               race_fct_other = "Race: other", 
+               health_num = "Health", 
+               aspirations_college_num = "College Aspirations", 
+               alcohol_bin = "Alcohol", 
+               gpa = "Grades")
+
+nn_plot <- cobalt::love.plot(nn_out, 
+                  title = "Covariate Balance Nearest Neighbor Matching", 
+                  stars = "raw", 
+                  var.names = new.names
+                  )
+
+m_plot <- cobalt::love.plot(mahalanobis_out, 
+                  title = "Covariate Balance Mahalanobis Matching",
+                  stars = "raw", 
+                  var.names = new.names)
+
+subclass_plot <- cobalt::love.plot(subclass_out, 
+                  title = "Covariate Balance Subclassification Matching", 
+                  stars = "raw",
+                  var.names = new.names)
+
+cbps_plot <- cobalt::love.plot(cbps_out, 
+                  title = "Covariate Balance CBPS Matching", 
+                  stars = "raw", 
+                  var.names = new.names)
+
+
+```
+
+```{r cowplots-cobalt-matches, echo=FALSE, out.height = "40%", fig.cap = "* indicates variables for which the displayed value is the raw (unstandardized) difference in means."}
+nn_plot 
+m_plot
+subclass_plot
+cbps_plot
+
+```
+
+### Linear regression models with four methods of matching:
+```{r regressions-matching-methods, include = FALSE}
+# Linear regressions with four matching models to assess robustness of matching:
+
+# dataframes:
+nn_match <- match.data(nn_out)
+mahalanobis_match <- match.data(mahalanobis_out)
+subclass_match <- match.data(subclass_out)
+
+# models: 
+lm_nn <- lm(ed_attainment_num ~ sports_fct + parent_avg_ed_imputed + race_fct + 
+                alcohol_bin + log_income + health_num + gpa + male_fct + 
+                aspirations_college_num, data = nn_match)
+
+lm_mahalanobis <- lm(ed_attainment_num ~ sports_fct + parent_avg_ed_imputed + 
+                         race_fct + alcohol_bin + log_income + health_num + gpa +
+                         male_fct + aspirations_college_num,
+                     data = mahalanobis_match)
+
+lm_subclass <- lm(ed_attainment_num ~ sports_fct + parent_avg_ed_imputed + 
+                         race_fct + alcohol_bin + log_income + health_num + gpa +
+                         male_fct + aspirations_college_num,
+                  weights = weights,
+                  data = subclass_match)
+
+```
+
+All four methods of matching gave similar results in linear regression models, indicating that the results are robust across matching methods. 
+
+```{r stargazer-matching-models, echo = FALSE, results = "asis"}
+stargazer(lm_nn, lm_mahalanobis, lm_subclass, lm_cbps,
+    font.size = "footnotesize", 
+    title     = "Estimates of Sports Participation on Educational Attainment using Different Matching Methods",
+    omit.stat = c("f", "ser"),
+    type      = 'latex',
+    header    = FALSE, 
+    table.placement="!h",
+    dep.var.labels="Educational Attainment", 
+    covariate.labels=  c("Sports: Yes", "Parent Education", 
+                      "Race: Black", "Race: Hispanic", "Race: Other", 
+                      "Alcohol: yes", "Income (log)", "Health", 
+                      "Grades", "Sex: Male", "College Aspirations","Constant"), 
+    column.labels = c("Nearest Neighbor", "Mahalanobis", "Subclassification", "CBPS")
+)
+```
+
+\newpage
+## Appendix: Assumptions of Linear Regression: 
+
+```{r appendix-assumptions-lr, echo=FALSE}
+par(mfrow = c(2,2))
+plot(mod7)
+```
+
+```{r appendix-assumptions-hist, echo=FALSE, out.width = "50%"}
+hist(mod7$residuals, 
+     main = "Histogram of Residuals", 
+     xlab = "Residuals") # normal residuals
+
+hist(ah_imputed$ed_attainment_num, 
+     main = "Educational Attainment",
+     xlab = "Ed. Attainment") #non-normal
+hist(ah_imputed$parent_avg_ed_imputed, 
+     main = "Parent (mean) Educational Attainment", 
+     xlab = "Parent (mea) Ed. Attainment") # slightly non-normal
+hist(ah_imputed$log_income, 
+     main = "Log Income", 
+     xlab = "log Income") # normal
+hist(ah_imputed$health_num, 
+     main = "Health Rating", 
+     xlab = "Health, 1 = poor to 5 = excellent") # non-normal
+hist(ah_imputed$gpa, 
+     main = "Recent grades (mean), 1 - 4", 
+     xlab = "Recent grades (mean)") # non-normal
+hist(ah_imputed$aspirations_college_num, 
+     main = "Desire to Attend College", 
+     xlab = "Desire (increasing 1 - 5)") # non-normal
+
+sex_counts <- table(ah_imputed$male_fct)
+barplot(sex_counts, 
+        main = "Bar plot of Sex", 
+        xlab = "0 = Female, 1 = Male")
+
+race_counts <- table(ah_imputed$race_fct)
+barplot(race_counts, 
+        main = "Bar plot of Race")
+
+alcohol_counts <- table(ah_imputed$alcohol_bin)
+barplot(alcohol_counts,
+        main = "Bar plot of alcohol use", 
+        xlab = "0 = no alcohol use, 1 = alcohol use")
+```
+
+```{r check-outliers, include=FALSE}
+## Check outliers:
+
+outliers <- ah_imputed[c(1884, 3069, 2359, 436, 1619, 727), ]
+    # 94711176, 98500910, 96570212, 90718112, 94508068, 91579242
+   
+outliers 
+```
+
+## Appendix: ANOVA tables to select best model
+
+
+
+```{r anova, include=FALSE}
+mod1v2 <- anova(mod1, mod2) # go from mod1 to mod2
+
+mod2v3 <- anova(mod2, mod3) # go from mod2 to mod3
+
+mod3v4 <- anova(mod3, mod4) # go to mod4
+
+mod4v5 <- anova(mod4, mod5)
+
+mod5v6 <- anova(mod5, mod6)
+
+mod6v7 <- anova(mod6, mod7) ## 7 best model**
+
+mod7v8 <- anova(mod7, mod8) # not worth adding race
+
+mod7v9 <- anova(mod7, mod9) # not worth adding alcohol
+
+mod7vfull <- anova(mod7, lm_cbps) # not worth adding full model
+
+mod_test <- lm(ed_attainment_num ~ gpa + parent_avg_ed_imputed + 
+               aspirations_college_num + health_num + log_income + male_fct,
+           weights = cbps_weights, 
+           data = ah_imputed)
+
+mod7vtest <- anova(mod_test, mod7) # removing sports is equivalent
+
+```
+
+
+```{r anova-tables, echo=FALSE, results = "asis"}
+mod1v2 %>% 
+    xtable::xtable(
+    caption = "Simple Bivariate Model (1) vs. 
+           Model Controlling gpa (2)"
+    ) %>% 
+    print(type = "latex")
+
+mod2v3 %>% 
+    xtable::xtable(
+    caption = "Model Controlling gpa (2) vs. gpa and parents' education (3)"
+    ) %>% 
+    print(type = "latex")
+
+mod3v4 %>% 
+    xtable::xtable(
+    caption = "gpa + parents' education (3) vs. + college aspirations (4)"
+    ) %>% 
+    print(type = "latex")
+
+mod4v5 %>% 
+    xtable::xtable(
+    caption = "gpa + parents' ed + college aspirations (4) vs. + health"
+    ) %>% 
+    print(type = "latex")
+
+mod5v6 %>% 
+    xtable::xtable(
+    caption = "gpa + parents' ed + college aspirations + health (5) vs. + log income"
+    ) %>% 
+    print(type = "latex")
+
+mod6v7 %>% 
+    xtable::xtable(
+    caption = "gpa + parents' ed + college aspirations + health + log(income) (6) vs. + sex"
+    ) %>% 
+    print(type = "latex")
+
+mod7v8 %>% 
+    xtable::xtable(
+    caption = "Preferred model (7) vs. (7) + race"
+    ) %>% 
+    print(type = "latex")
+
+mod7v9 %>% 
+    xtable::xtable(
+    caption = "Preferred model (7) vs. (7) + alcohol"
+    ) %>% 
+    print(type = "latex")
+
+mod7vfull %>% 
+    xtable::xtable(
+    caption = "Preferred model (7) vs. full model"
+    ) %>% 
+    print(type = "latex")
+
+mod7vtest %>% 
+    xtable::xtable(
+    caption = "Preferred model (7) vs. (7) without sports"
+    ) %>% 
+    print(type = "latex")
+```
+
+
+

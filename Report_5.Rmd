@@ -1,0 +1,1376 @@
+---
+title: "Report 5: Add Health"
+author: "Sally Cochrane"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+  word_document: default
+header-includes: \usepackage{float} \floatplacement{figure}{h}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+	message = FALSE,
+	warning = FALSE, 
+	fig.pos = "H"
+)
+```
+
+```{r load-packages, include=FALSE, warning= FALSE, message = FALSE}
+library(dplyr)
+library(Amelia)
+library(stargazer)
+library(kableExtra)
+library(sjPlot)
+library(ggplot2)
+library(xtable)
+options(xtable.comment = FALSE)
+library(sjlabelled)
+library(MatchIt)
+
+set.seed(0)
+```
+
+```{r load-datasets, include = FALSE, eval = FALSE}
+# Load datasets: 
+ah1 <- sjlabelled::read_stata(
+    path = "Wave1-Data.dta", 
+    drop.labels= FALSE, 
+    verbose = TRUE)
+
+ah4 <- sjlabelled::read_stata(
+    path = "Wave4-Data.dta", 
+    drop.labels=FALSE,
+    verbose= TRUE)
+
+dim(ah1)
+dim(ah4)
+names(ah1)[1:10]
+names(ah4)[1:10]
+
+```
+
+```{r name-columns, include = FALSE, eval = FALSE}
+ah1 <- ah1 %>% mutate(
+    AID = AID,
+    # Filter for age: 
+    age = S1,
+    birthmonth = H1GI1M,
+    birthyear = H1GI1Y,
+    # Hours non-summer: 
+    hrs_nonsummer = H1EE4, 
+    # Hours summer: 
+    hrs_summer = H1EE6, 
+    
+    # Control variables: 
+    sex = BIO_SEX, 
+    race = H1GI9, 
+    health1 = H1GH1, 
+    citizen = H1GI14, 
+    #income: 
+    income = PA55, 
+    # variables to help impute missing income: 
+    parent_ed = PA12,
+    parent_partner_ed = PB8, 
+    res_dad_ed = H1RF1,
+    res_mom_ed = H1RM1,
+    public_assistance = PA21,
+    pay_bills = PA56,
+    parent_employed = PA17,
+    partner_employed = PB13
+    ) %>%
+    select(AID, age, birthmonth, birthyear, hrs_nonsummer, hrs_summer, sex, race, health1, citizen, income, parent_ed, parent_partner_ed, res_dad_ed, res_mom_ed, public_assistance, pay_bills, parent_employed, partner_employed)
+
+ah4 <- ah4 %>% mutate(
+    AID = AID, 
+    # Outcome variable: 
+    earnings = H4EC2,
+    earnings_guess = H4EC3,
+    
+    # Control variables: 
+    ed_level = H4ED2, 
+    enrolled = H4ED6, 
+    health4 = H4GH1
+    ) %>% 
+    select(AID, earnings, earnings_guess, ed_level, enrolled, health4)
+    
+```
+
+
+```{r merge, include=FALSE, eval = FALSE}
+## MERGE datasets: 
+ahfull <- inner_join(ah1, ah4, by = "AID")
+
+glimpse(ahfull)
+
+
+```
+
+```{r recode, include = FALSE, eval = FALSE}
+
+## RECODE: 
+ahfull_recoded <- ahfull %>% mutate(
+    # Keep ID: 
+    AID = AID, 
+    
+    # Age: 
+    age = age,
+    
+    # Age from birthday: 
+    age2 = case_when(
+        birthyear > 80 ~ 0, # doesn't matter if younger than 14
+        birthyear <= 80 & birthyear > 79 ~ 14, # survey started 1994
+        birthyear <= 79 & birthyear > 78 ~ 15, 
+        birthyear <= 78 & birthyear > 77 ~ 16, 
+        birthyear <= 77 & birthyear > 76 ~ 17,
+        birthyear <= 76 & birthyear > 75 ~ 18, 
+        birthyear <= 75 & birthyear > 74 ~ 19, 
+        birthyear <= 74 & birthyear > 73 ~ 20, 
+        TRUE ~ NA_real_) %>% as.numeric(),
+    
+    # Combine ages to fill in missing values: 
+    age_full = case_when(
+        !is.na(age) ~ age, # if age is available, use that
+        is.na(age) ~ age2, # if age is missing, use calculated age from bday
+        TRUE ~ NA_real_) %>% as.numeric(),
+    
+    # Explanatory Variable: work during school year:   
+    hrs_nonsummer = case_when(
+        hrs_nonsummer < 900 ~ hrs_nonsummer,
+        TRUE ~ NA_real_) %>% as.numeric(),
+    work_nonsummer = case_when(
+        hrs_nonsummer < 10 ~ 0, 
+        hrs_nonsummer >= 10 ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(),
+    
+    # Outcome Variable: Earnings: 
+    earnings = case_when(
+        earnings <= 999995 ~ earnings,
+        TRUE ~ NA_real_) %>% as.numeric(), 
+        # make it a log: 
+    log_earnings = case_when(
+        earnings == 0 ~ 0, 
+        earnings > 0 & earnings <= 999995 ~ log(earnings), 
+        TRUE ~ NA_real_) %>% as.numeric(), 
+        # best guess at earnings for those missing: 
+    log_earnings_guess = case_when(
+        earnings_guess <= 11 ~ log(earnings_guess), 
+        TRUE ~ NA_real_),
+        # Find where no earnings and no guess to remove: 
+    earningsNA = case_when(
+        is.na(log_earnings) & is.na(log_earnings_guess) ~ 1, 
+        TRUE ~ 0) %>% as.numeric(),
+    
+    # Control variables: 
+    work_summer = case_when(
+        hrs_summer > 0 & hrs_summer < 900 ~ 1, 
+        hrs_summer == 0 ~ 0,
+        TRUE ~ NA_real_) %>% as.factor(),
+    # Demographic control variables: 
+        # Sex:
+    sex_fct = case_when(
+        sex  == 1 ~ "male", 
+        sex == 2 ~ "female", 
+        TRUE ~ NA_character_) %>% as.factor(), 
+        # Race: 
+    race_fct = case_when(
+        race == 1 ~ "white", 
+        race == 2 ~ "black", 
+        race == 3 | race == 4 | race == 5 ~ "other", 
+        TRUE ~ NA_character_) %>% as.factor(),
+        # Health at wave 1:
+    health1 = case_when(
+        health1 == 1 ~ 5, 
+        health1 == 2 ~ 4, 
+        health1 == 3 ~ 3, 
+        health1 == 4 ~ 2, 
+        health1 == 5 ~ 1, 
+        TRUE ~ NA_real_) %>% as.numeric(),
+        # Health at wave 4:
+    health4 = case_when(
+        health4 == 1 ~ 5, 
+        health4 == 2 ~ 4, 
+        health4 == 3 ~ 3, 
+        health4 == 4 ~ 2, 
+        health4 == 5 ~ 1,
+        TRUE ~ NA_real_) %>% as.numeric(),
+        # Citizen? 
+    citizen_fct = case_when(
+        citizen == 0 ~ 0, 
+        citizen == 1 | citizen == 7 ~ 1, 
+        TRUE ~ 1) %>% as.factor(),
+        # Educational attainment: 
+    ed_level = case_when(
+        ed_level == 1 ~ 1, 
+        ed_level == 2 ~ 2, 
+        ed_level == 3 ~ 3,
+        ed_level == 4 ~ 4,
+        ed_level == 5 ~ 5, 
+        ed_level == 6 ~ 6, 
+        ed_level == 7 ~ 7, 
+        ed_level == 8 | ed_level == 12 ~ 8, # postbac and master's similar
+        ed_level == 9 | ed_level == 13 ~ 9, # postbac and master's completion
+        ed_level == 10 ~ 10, 
+        ed_level == 11 ~ 11,
+        TRUE ~ NA_real_) %>% as.numeric(), 
+        # Currently enrolled? 
+    enrolled = case_when(
+        enrolled <= 1 ~ enrolled, 
+        TRUE ~ NA_real_) %>% as.factor(), 
+         
+        # Family income when a child: 
+    income = case_when(
+        income <= 999 ~ income, # range, 9996 refused
+        TRUE ~ NA_real_) %>% as.numeric(),
+        # Make income a log income: 
+    log_income = case_when(
+        income == 0 ~ 0, 
+        income > 0 ~ log(income)),
+    # Variables to help impute income: 
+    parent1ed = case_when(
+        parent_ed == 10 ~ 0,
+        parent_ed <= 9 ~ parent_ed, 
+        TRUE ~ NA_real_) %>% as.numeric(),
+    parent2ed = case_when(
+        parent_partner_ed == 10 ~ 0,
+        parent_partner_ed <= 9 ~ parent_partner_ed, 
+        TRUE ~ NA_real_) %>% as.numeric(),
+    resmomed = case_when(
+        res_mom_ed == 10 ~ 0,
+        res_mom_ed <= 9 ~ res_mom_ed, 
+        TRUE ~ NA_real_) %>% as.numeric(), 
+    resdaded = case_when(
+        res_dad_ed == 10 ~ 0,
+        res_dad_ed <= 9 ~ res_dad_ed, 
+        TRUE ~ NA_real_) %>% as.numeric(),
+    pay_bills = case_when(
+        pay_bills == 0 ~ 0, 
+        pay_bills == 1 ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(),
+    pubassist = case_when(
+        public_assistance == 0 ~ 0, 
+        public_assistance == 1 ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(), 
+    parent1employed = case_when(
+        parent_employed == 0 ~ 0, 
+        parent_employed == 1 ~ 1, 
+        TRUE ~ NA_real_) %>% as.factor(), 
+    parent2employed = case_when(
+        partner_employed == 0 ~ 0,
+        partner_employed == 1 ~ 1,
+        TRUE ~ NA_real_) %>% as.factor(), 
+)
+
+    # check age coding: 
+ahfull_recoded %>% select(age, age2, age_full) %>% head(n = 40)
+    # how many younger than 14? 
+ahfull_recoded %>% filter(age_full < 14) %>% nrow() # 1245 younger than 14
+
+## Filter out children younger than 14 (legal working age): 
+ahfull_recoded <- ahfull_recoded %>% filter(age_full >= 14 | is.na(age_full))
+    # check: 
+summary(ahfull_recoded$age_full)
+
+# What are mean and median hours worked? 
+summary(ahfull_recoded$hrs_nonsummer) # among all students, median = 3, mean = 9
+summary(ahfull_recoded$hrs_nonsummer[ahfull_recoded$hrs_nonsummer > 0])
+    # among working students 14 and older, mean = 16.38, median = 15 hrs/week
+
+    
+
+
+## SELECT RELEVANT RECODED COLUMNS: 
+ahfull_recoded_smaller <- ahfull_recoded %>% select(
+    AID,
+    age_full,
+    hrs_nonsummer,
+    work_nonsummer,
+    work_summer, 
+    log_earnings,
+    log_earnings_guess,
+    earningsNA,
+    sex_fct, 
+    race_fct,
+    health1,
+    health4,
+    citizen_fct,
+    ed_level, 
+    enrolled, 
+    log_income, 
+    parent1ed, 
+    parent2ed, 
+    resmomed, 
+    resdaded,
+    pay_bills, 
+    pubassist, 
+    parent1employed, 
+    parent2employed
+)
+
+
+```
+
+```{r save-dataset, include=FALSE, eval = FALSE}
+# Save: 
+saveRDS(ahfull_recoded_smaller, file = "ahfull_recoded_smaller.rds")
+```
+
+```{r load-scrubbed-data, include = FALSE}
+ahfull_recoded_smaller <- readRDS("ahfull_recoded_smaller.rds")
+
+glimpse(ahfull_recoded_smaller)
+
+```
+
+```{r remove-missing-explanatory-outcome, include=FALSE}
+
+    # how many missing earnings and missing earnings guess? 
+ahfull_recoded_smaller %>% filter(is.na(log_earnings)) %>% nrow() #221
+ahfull_recoded_smaller %>% filter(is.na(log_earnings) & is.na(log_earnings_guess)) %>% nrow() # 103
+
+### Remove missing explanatory variables (workhours): 
+ahfull_complete <- ahfull_recoded_smaller[!is.na(ahfull_recoded_smaller$work_nonsummer), ]
+
+    # how many missing summer work? 
+ahfull_complete %>% filter(is.na(work_summer)) %>% nrow() #53
+
+#### Remove missing summer work:
+ahfull_complete <- ahfull_complete[!is.na(ahfull_complete$work_summer), ]
+
+### Remove missing outcome variables (log_earnings):
+    # when earningsNA == 1, both earnings and earnings_guess missing
+    # when earningsNA == 0, not missing
+ahfull_complete <- ahfull_complete[(ahfull_complete$earningsNA == 0), ]
+
+
+```
+
+```{r impute-amelia, include = FALSE}
+# Impute income with Amelia: 
+
+    # Turn into a dataframe, remove variables not needed: 
+ah_subset <- data.frame(ahfull_complete %>% select(-c(earningsNA)))
+
+    # identify columns with bounds to include in bounds matrix: 
+match(c("log_income", "log_earnings", "health1", "ed_level", "hrs_nonsummer"), names(ah_subset))
+        # 15  6 10 13  3 
+
+    # set up a matrix of bounds: 
+bounds_matrix <- matrix(
+    ncol = 3, 
+    byrow = TRUE, 
+    data = c(15, 0, 6.907, 
+             6, 0, 13.816, 
+             10, 1, 5, 
+             13, 1, 13,
+             3, 0, 120)
+)
+
+# AMELIA: 
+ah_imputed <- amelia(
+    x = ah_subset, 
+    m = 1, 
+    # don't impute ID and explanatory variables:
+    idvars = c("AID", "work_nonsummer", "work_summer", "log_earnings_guess"),
+    noms = c("sex_fct", "race_fct", "enrolled", "citizen_fct", "pay_bills", 
+             "pubassist", "parent1employed", "parent2employed"),
+    bounds = bounds_matrix
+)
+
+ah_imputed <- ah_imputed$imputations$imp1
+
+# Remove variables used for imputation, but not for further analysis: 
+ah_imputed_smaller <- ah_imputed %>% select(
+    AID, age_full, work_nonsummer, hrs_nonsummer, work_summer, log_earnings, sex_fct, race_fct, health1, health4, citizen_fct, ed_level, enrolled, log_income)
+
+```
+
+```{r matching, include = FALSE}
+# nearest neighbor: 
+nn_out <- matchit(
+    formula = work_nonsummer ~ work_summer + age_full + sex_fct + race_fct + health1 + health4 + citizen_fct + ed_level + enrolled + log_income, 
+    data = ah_imputed_smaller, 
+    method = "nearest", 
+    caliper = 0.05, 
+    replace = TRUE, 
+    ratio = 1
+)
+summary(nn_out)
+
+# Mahalanobis: 
+maha_out <- matchit(
+    formula = work_nonsummer ~ work_summer + age_full + sex_fct + race_fct + health1 + health4 + citizen_fct + ed_level + enrolled + log_income, 
+    data = ah_imputed_smaller, 
+    method = "nearest", 
+    distance = "mahalanobis",
+    replace = TRUE
+)
+
+summary(maha_out)
+
+# Subclassification:
+subclass_out <- matchit(
+    formula = work_nonsummer ~ work_summer + age_full + sex_fct + race_fct + health1 + health4 + citizen_fct + ed_level + enrolled + log_income, 
+    data = ah_imputed_smaller, 
+    method = "subclass"
+)
+
+summary(subclass_out)
+
+# CBPS matching: 
+cbps_out <- CBPS::CBPS(
+    formula = work_nonsummer ~ work_summer + age_full + sex_fct + race_fct + health1 + health4 + citizen_fct + ed_level + enrolled + log_income, 
+    data = ah_imputed_smaller
+)
+
+    # assign weights to ah_imputed_smaller:
+ah_imputed_smaller$cbps_weights <- cbps_out$weights
+
+    # look at balance: 
+CBPS::balance(cbps_out)
+
+```
+
+```{r label-data-for-codebook, include = FALSE}
+# label data for codebook:
+ah_codebook <- ah_imputed_smaller %>% select(-hrs_nonsummer) %>% mutate(
+    work_nonsummer = set_label(work_nonsummer, label = c("Work Status (Non-Summer)")), 
+    work_summer = set_label(work_summer, label = c("Work Status (Summer)")), 
+    age_full = set_label(age_full, label = c("Age Wave 1")),
+    log_earnings = set_label(log_earnings, label = c("Log(Earnings)")), 
+    sex_fct = set_label(sex_fct, label = c("Sex")), 
+    race_fct = set_label(race_fct, label = c("Race")), 
+    health1 = set_label(health1, label = c("Health Wave 1")), 
+    health4 = set_label(health4, label = c("Health Wave 4")), 
+    citizen_fct = set_label(citizen_fct, label = c("Born US Citizen")), 
+    ed_level = set_label(ed_level, label= c("Highest Education Level")), 
+    enrolled = set_label(enrolled, label = c("Enrolled Wave 4")), 
+    log_income = set_label(log_income, label = c("Family Log(Income) Wave 1"))
+)
+
+levels(ah_codebook$work_nonsummer) <- list("No" = 0, "Yes" = 1)
+levels(ah_codebook$work_summer) <- list("No" = 0, "Yes" = 1)
+levels(ah_codebook$citizen_fct) <- list("No" = 0, "Yes" = 1) 
+levels(ah_codebook$enrolled) <- list("No" = 0, "Yes" = 1)
+```
+
+```{r make-codebook, include = FALSE, eval = FALSE}
+dataReporter::makeCodebook(ah_codebook, replace = TRUE)
+```
+
+## Introduction: 
+
+Does work experience in high school affect future earnings? The proportion of teenagers participating in the labor force has continued to decline since its peak in 1979, when nearly 60% of American teenagers worked. In contrast, in 2019 only roughly one third of teens were employed (Dickler, 2019). Are teenagers missing out on valuable work experience? On the one hand, some scholars find that students who work during high school have higher earnings than their non-working peers up to a decade later (Carr et al., 1996), perhaps because working during high school improves responsibility and perceptions of one's own competence--features that may help on the labor market (Cunnien et al. 2009). On the other hand, other scholars find negative effects of working more than a "moderate" number of hours during the school year, including increased delinquent behaviors (Staff and Uggen, 2003), lower GPA's (DeSimone, 2006), and decreased chance of attending college (Lee and Orazem, 2010); effects that could lower future earnings. Using data from the Add Health survey from Wave 1 (1994-1995) and Wave 4 (2008-2009), we use multiple regression with covariate balancing propensity score (CBPS) weights to evaluate the theory that non-summer high school employment in wave 1, defined as 10 hours per week or more, affects earnings reported in wave 4. We find evidence consistent with the theory that high school employment is associated with higher future earnings. 
+
+
+## Theory: 
+Some scholars find beneficial effects of working in the school year during high school. Using data from the Youth Development Study, Cunnien et al. (2009) found that working as an adolescent improved "self-efficacy" (the feeling of self-confidence and ability to meet goals in the face of adversity). If Cunnien et al. are correct, this effect could potentially increase future earnings by improving performance in the labor market. And indeed, some scholars do find that high school workers earn more than their non-working peers later in life. Carr et al. (1996), looking at data from students aged 16-19 in 1979, found that those who worked were less likely to attend or complete college, but that working as a teen positively influenced employment status and income even a decade later, offsetting the negative effects of less education. Similarly, Ruhm (1997) found that low to moderate hours of high school employment was positively correlated with future earnings even though working students had slightly lower educational attainments than their non-working counterparts. On the other hand, some scholars find negative effects from moderate to high levels of employment during the school year. For instance, Ruhm's (1997) positive findings, above, only held for students working 10 hours or less per week. Similarly, Lee and Orazem (2010) found that working more hours during high school slightly decreased the likelihood of going to college. And DeSimone (2006), using the Monitoring the Future surveys (1991-2004), found that working up to 15 hours per week increased the GPA's of 12th graders, but working more was associated with declining GPA. Staff and Uggen (2003) found that rates of delinquency (drug use, alcohol use, arrest, and school deviance) were higher among adolescents with jobs that increased autonomy, had higher wages, and more working hours. If these latter scholars are correct, then the negative effects of moderate to high levels of employment on GPA, college attendance, and delinquency may decrease future earnings by preventing the students from reaching their full academic and employment potentials. 
+
+## Data: 
+
+Data come from the Add Health survey, waves 1 and 4, conducted in 1994-1995 and 2008-2009. The outcome variable of interest was the respondent's personal earnings before taxes in wave 4. This was logged to create a more normal distribution. The explanatory variable of interest was whether the respondent reported working for pay for 10 or more hours per non-summer week in wave 1. 10 or more hours/week was chosen as the "treatment" because we were interested in testing the effects of employment vs. non-employment, and fewer than 10 hours/week of paid work is likely to reflect incidental work like yard work and babysitting rather than true employment (the type of work was not asked in wave 1). Furthermore, the scholarly literature variously labels 10, 15, and 20 hours per week as "moderate to high" employment; the level at which negative consequences of employment are theorized to begin. 10 hours/week was appropriate for this dataset because the mean hours of work per week for the sample was 9.2 and the median was 3. This number thus follows some of the literature while also reflecting that high school employment has declined since most of the literature was published, making fewer hours per week appropriate, and it is more likely to reflect the treatment of interest -- employment -- rather than incidental paid work.
+
+Age was a control variable, ranging from 14 - 20 at wave 1, and 2147 respondents younger than 14 at wave 1 were removed from the sample as the legal working age in the US is 14. Race was simplified to White, Black, and other, as the number in other categories was small. Other control variables included whether the respondent was enrolled at wave 4, as attending school may limit the number of hours one can work and therefore earnings; family income at wave 1, which was logged to make the distribution more normal; whether the respondent was born a US citizen, as citizenship status may affect job opportunities; self-reported overall health, scaled 1 (poor) to 5 (excellent) at waves 1 and 4, as poor health may impede working ability; highest education level attained by wave 4, scaled from 1 (8th grade or less) to 11 (completed a doctoral degree) (see Appendix for full coding); and whether the respondent worked for pay during the summer at wave 1, to make sure we were isolating the effect of school-year employment rather than work experience in general. 
+
+Missing data for working status were removed because the number missing was small (33, or 0.853%), and because we preferred not to impute the explanatory variable. We also preferred not to impute the control variable of summer work, as it is binary and no other variables in the dataset seemed to predict summer work well. Only 79 entries, or 2.04%, did not report summer work, so removing them was unlikely to bias the results. If wave 4 earnings was missing, we used the respondent's estimated earnings (given as a range) to help impute earnings using Amelia. If no estimate was given, they were removed from the dataset as we preferred not to impute the outcome variable, as as exploratory analysis suggested missing earnings was not random (see Appendix for plots). 221 earnings entries were missing, of which 103 were also missing earnings estimates, and so were removed. Once these missing entries were removed, the variables with the most missingnesss were wave 1 income (895, or 24.3%) and wave 4 earnings (112, or 3.04%, all of which provided earnings estimates). All other missingess was under 0.1%, so imputation was unlikely to bias the results. We used Amelia for imputation. We also included several variables to help predict wave 1 income which were not part of the final analysis (see Appendix for summary of missingness). 
+
+The working and non-working groups were slightly imbalanced in several variables. Workers were older than non-workers; workers also worked summers more often; and more workers were slightly healthier at both waves (see Appendix for plots). Four matching methods were used, and CBPS weights were selected as providing the best balance (see Appendix for plots of balance using four methods). **Table 1** shows summary statistics before and after weighting with CBPS. Note that with CBPS weights, the mean age of the sample shifts higher (from 15.7 to 16.3 years), the proportion of men to women is increased; and the proportion of White people to Black and "other" is increased. These changes may slightly alter the generalizability of our results. 
+
+
+```{r summary-statistics-before-matching, include = FALSE}
+## SUMMARY STATS BEFORE MATCHING
+   
+# Remove underscores and labels for tableby latex printing: 
+ahtable <- ah_imputed_smaller %>% mutate(
+    worknonsummer = work_nonsummer, 
+    logearnings = log_earnings, 
+    worksummer = work_summer, 
+    sexfct = sex_fct, 
+    age = age_full,
+    racefct = race_fct, 
+    health1 = health1, 
+    health4 = health4, 
+    citizenfct = citizen_fct, 
+    edlevel = ed_level, 
+    enrolled = enrolled, 
+    logincome = log_income, 
+    cbpsweights = cbps_weights
+) %>% dplyr::select(worknonsummer, logearnings, worksummer, sexfct, age, racefct, health1, health4, citizenfct, edlevel, enrolled, logincome, cbpsweights)
+
+ahtable <- remove_all_labels(ahtable)
+
+levels(ahtable$worknonsummer) <- c("No", "Yes")
+
+# Generate summary stats by work status before matching:
+tab1 <- arsenal::tableby(worknonsummer ~ logearnings + worksummer +
+                             sexfct + age + racefct + health1 + health4 + 
+                             citizenfct + edlevel + enrolled + logincome, 
+                         test = FALSE, 
+                         data = ahtable, 
+                         digits = 2, 
+                         numeric.stats = c("meansd"), 
+                         numeric.simplify = TRUE) %>% 
+    summary(removeBlanks = TRUE) 
+
+# save as a dataframe: 
+sumstats_before_matching <- as.data.frame(tab1)
+
+# change first column of names: 
+sumstats_before_matching[ ,1] <- c("Log(Earnings)", "Work Summer", "No", "Yes", "Sex", "Female", "Male", "Age", "Race", "Black", "Other", "White", "Health W.1", "Health W.4", "Born US Citizen", "No", "Yes", "Ed. Level", "Enrolled W.4", "No", "Yes", "Log(Income)")
+
+
+## SUMMARY STATS AFTER MATCHING: 
+tab2 <- arsenal::tableby(worknonsummer ~ logearnings + worksummer +
+                             sexfct + age + racefct + health1 + health4 + 
+                             citizenfct + edlevel + enrolled + logincome, 
+                         data = ahtable, 
+                         weights = cbpsweights, 
+                         total = FALSE, 
+                         numeric.stats = c("meansd"), 
+                         numeric.simplify = TRUE) %>% 
+    summary(removeBlanks = TRUE) 
+
+# save as a dataframe: 
+sumstats_after_matching <- as.data.frame(tab2)
+sumstats_after_matching[ ,1]  <- rep("", 22)
+
+sumstats_all <- list(sumstats_before_matching, sumstats_after_matching) 
+sumstats_all <- as.data.frame(sumstats_all)
+colnames(sumstats_all)[c(1, 5)] <- c("", "") # remove "var 1., var.5"
+```
+
+```{r summary-stats-table, echo=FALSE, results = "asis"}
+
+kableExtra::kable(
+    sumstats_all,
+    format = "latex", 
+    caption = "Summary Statistics by Work Status, Before and After CBPS Matching",
+    booktabs = TRUE
+) %>% 
+    add_indent(positions = c(3, 4, 6, 7, 10, 11, 12, 16, 17, 20, 21)) %>% 
+    add_header_above(c("", "Unmatched" = 3, "Matched" = 3)) %>% 
+    kable_styling(full_width=FALSE, font_size = 8)
+```
+
+## 4 Methods
+
+We use multiple regression using covariate balancing propensity score (CBPS) weights. Using CBPS weights allows us to analogize this observational study to an experiment in which students aged 14 to 20 would be randomly assigned to the treatment condition (working 10 or more hours per week) and the control condition (working less than 10 hours per week), because CBPS weights ensure that the "treated" and "control" groups from the sample are approximately balanced on observed pre-treatment variables. Multiple regression is appropriate because we want to determine whether the "treatment" is associated with earnings in wave 4 on its own and when controlling for other variables. Some of the assumptions of linear regression may be violated, but the violations do not merit further transformation of the data (see Appendix for diagnostic plots). The residuals vs. fitted values plot shows that the linearity assumption may be violated, but it is close enough to clustering around a horizontal line that we proceed as if it is met. The normality assumption may be violated: the residuals are nearly normally distributed, but there is a second small peak of very negative residuals, as show in the normal Q-Q plot and histogram of residuals. The scale-location plot does not cluster around a perfectly horizontal line, so the equal variance assumption may be violated. Histograms of the variables show that age is skewed right, health at waves 1 and 4 are skewed left, education level has a second peak at the low end, and log earnings have a second peak around zero. However, transformation of these variables would not make sense, so we proceed as if the equal variance assumption is met. The residuals vs. leverage plot indicates several outliers, but investigation showed that none of these were due to obvious coding errors, so they were retained. Finally, the independence assumption may not be met because the survey included siblings, so there is a possibility that some observations influenced others. However, since the schools where the surveys were conducted were randomly drawn from the entire United States, and from various types of schools (public, private, charter), major clustering problems based on geography are unlikely to be a problem.
+
+A preferred model was selected by removing control variables from the full model and using ANOVA to assess the improvement in explanatory power balanced with parsimony using the F-statistic (see Appendix for ANOVA tables). The full model included interaction terms between education level and sex, race, enrollment status, and citizenship, because we suspected that education may have different effects on earnings depending on those features. Using this method, the preferred model is:
+
+
+```{r make-models, include = FALSE}
+## Working down: 
+modfull_int <- lm(log_earnings ~ work_nonsummer + ed_level*sex_fct + ed_level*race_fct + ed_level*citizen_fct + ed_level*enrolled + log_income + age_full +  health4 + health1 + work_summer, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+
+# take out summer work:
+mod1 <- lm(log_earnings ~ work_nonsummer + ed_level*sex_fct + ed_level*race_fct + ed_level*enrolled + log_income + age_full + ed_level*citizen_fct + health4 + health1, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+
+# take out log(income): (Preferred model)
+mod2 <- lm(log_earnings ~ work_nonsummer + ed_level*sex_fct + ed_level*race_fct + ed_level*enrolled + age_full + ed_level*citizen_fct + health4 + health1, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+# can't take out age:
+mod3 <- lm(log_earnings ~ work_nonsummer + ed_level*sex_fct + ed_level*race_fct + ed_level*enrolled + ed_level*citizen_fct + health4 + health1, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+
+# take out health1: 
+mod4 <- lm(log_earnings ~ work_nonsummer + ed_level*sex_fct + ed_level*race_fct + ed_level*enrolled + age_full + ed_level*citizen_fct + health4, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+
+mod5 <- lm(log_earnings ~ work_nonsummer + ed_level*sex_fct + ed_level*race_fct + ed_level*enrolled + age_full + ed_level*citizen_fct + health1, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+
+# Can take out interaction terms? 
+mod6 <- lm(log_earnings ~ work_nonsummer + ed_level*sex_fct + ed_level*race_fct + ed_level*enrolled + age_full + citizen_fct + health4 + health1, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+
+mod7 <- lm(log_earnings ~ work_nonsummer + ed_level*sex_fct + ed_level*race_fct +
+               enrolled + age_full + ed_level*citizen_fct + health4 + health1, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+
+mod8 <- lm(log_earnings ~ work_nonsummer + ed_level*sex_fct + race_fct + ed_level*enrolled + age_full + ed_level*citizen_fct + health4 + health1, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+
+mod9 <- lm(log_earnings ~ work_nonsummer + sex_fct + ed_level*race_fct + ed_level*enrolled + age_full + ed_level*citizen_fct + health4 + health1, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+
+# Compare to simple bivariate: 
+mod_simple <- lm(log_earnings ~ work_nonsummer, 
+                 weights = cbps_weights, 
+                 data = ah_codebook)
+
+# Compare to preferred but without interaction terms: 
+mod2_noint <- lm(log_earnings ~ work_nonsummer + ed_level + sex_fct + race_fct + enrolled + age_full + citizen_fct + health4 + health1, 
+                  weights = cbps_weights, 
+                  data = ah_codebook)
+                 
+```
+
+
+$$
+\begin{aligned}
+\operatorname{log\;earnings} &= \alpha + \beta_{1}(\operatorname{work}_{\operatorname{yes}}) + \beta_{2}(\operatorname{education\;level})\ + \beta_{3}(\operatorname{sex}_{\operatorname{male}}) + \beta_{4}(\operatorname{race}_{\operatorname{other}}) + \beta_{5}(\operatorname{race}_{\operatorname{white}})\ + \\
+&\quad \beta_{6}(\operatorname{enrolled}_{\operatorname{yes}}) + \beta_{7}(\operatorname{age}) + \beta_{8}(\operatorname{citizen}_{\operatorname{yes}})\ + \beta_{9}(\operatorname{health\;w.4}) + \beta_{10}(\operatorname{health\;w.1}) + \beta_{11}(\operatorname{ed.} \times \operatorname{sex}_{\operatorname{male}})\ + \\ &\quad \beta_{12}(\operatorname{ed.} \times \operatorname{race}_{\operatorname{other}}) + \beta_{13}(\operatorname{ed.} \times \operatorname{race}_{\operatorname{white}}) +  \beta_{14}(\operatorname{ed.} \times \operatorname{enrolled}_{\operatorname{yes}})\ +
+\beta_{15}(\operatorname{ed.} \times \operatorname{citizen}_{\operatorname{yes}}) + \epsilon
+\end{aligned}
+$$
+Where the coefficients are: 
+$$
+\begin{aligned}
+\operatorname{\widehat{log\;earnings}} &= 5.92 + 0.26(\operatorname{work}_{\operatorname{Yes}}) + 0.32(\operatorname{education\; level}) + 2.8(\operatorname{sex}_{\operatorname{male}}) + 1.77(\operatorname{race}_{\operatorname{other}})\ + 1.44(\operatorname{race}_{\operatorname{white}}) + \\ &\quad 1.19(\operatorname{enrolled}_{\operatorname{Yes}}) - 0.08(\operatorname{age}) - 1.05(\operatorname{citizen}_{\operatorname{Yes}}) + 0.22(\operatorname{health4})\ + 0.15(\operatorname{health1}) - 0.3(\operatorname{ed.} \times \operatorname{sex}_{\operatorname{male}})\\
+&\quad  - 0.18(\operatorname{ed.} \times \operatorname{race}_{\operatorname{other}}) - 0.21(\operatorname{ed.} \times \operatorname{race}_{\operatorname{white}}) - 0.23(\operatorname{ed.} \times \operatorname{enrolled}_{\operatorname{Yes}})\ +  0.33(\operatorname{ed.} \times \operatorname{citizen}_{\operatorname{Yes}})
+\end{aligned}
+$$
+
+## Results: 
+```{r stargazer-lm-table, echo=FALSE, results = "asis"}
+stargazer_labels <- c("Work: Yes", "Education Level", "Sex:Male", "Race: Other",
+                      "Race: White", "Enrolled w.4", "Log Income w.1", "Age w.1", 
+                      "Born Citizen:Yes", "Health w.4", "Health w.1",  
+                      "Summer Work", "Ed. Level x Sex:Male", "Ed. Level x Race:Other",
+                      "Ed. Level x Race:White", "Ed. Level x Enrolled:yes", 
+                      "Ed. Level x Citizen", "Constant")
+
+stargazer(mod_simple, mod2_noint, mod2, modfull_int, 
+          font.size = "footnotesize", 
+          title = "Models for Association between Working during School and Later Earnings", 
+          omit.stat = c("f", "ser"), 
+          type = "latex", 
+          header = FALSE, 
+          single.row = TRUE, 
+          no.space= TRUE, 
+          covariate.labels= stargazer_labels,
+          dep.var.labels = "Log Earnings at wave 4", 
+          table.placement = "!h")
+             
+```
+Using linear regression with CBPS weights, we find evidence that working in high school is associated with increased earnings at wave 4. As **Table 2** shows, in the preferred model (3), working 10 hours or more per week is associated with a 1.29 ($e^{0.257}$) -fold increase in the median earnings as compared to not working, with a  p-value < 0.01, indicating we may reject the null hypothesis that there is no association between working status in wave 1 and earnings in wave 4. Substantively, this multiplicative effect represents, for example, moving from \$30,000 (approximately the median earnings in the whole sample), to \$38,700. This result is robust across all four models considered, with a similar estimated association between working status and earnings and similar p-value for those estimates. This result is also robust across all matching methods except for nearest neighbor matching (which has a p-value of < 0.1 for this estimate) (see Appendix), indicating that the results are likely not being driven by the balance of the data. **Plot A** shows the relationship between working status and log earnings in the preferred model. 
+
+It is also notable that in model 2, model 3 (the preferred model), and model 4 (the full model), several other variables are also statistically significantly associated with earnings. In the preferred model (3), each unit increase in health at wave 1 and health at wave 4 are associated with a 1.16 ($e^{0.147}$) and 1.25 ($e^{0.220}$) -fold increase in median earnings, respectively (p-value < 0.01 for both estimates). Also in the preferred model, the interactions between education level and sex, race, enrollment status, and citizenship were statistically significantly associated with estimated earnings. For males, each unit increase in education level is associated with a multiplicative change of 0.74 ($e^{-0.296}$) in median earnings (p-value < 0.01). As **Plot D** shows, This means that females earn more with each added unit of education than males. However, at lower education levels, males are estimated to earn more than females. With a high school education (ed. level = 3), males have a 6.77 ($e^{(2.800 + 3*-0.296)}$) -fold greater median earnings compared to women, and with a college education (= 7), men have a 2.07 ($e^{(2.800 + 7*-0.296)}$) -fold greater median earnings as compared to women. It is only at education level 9.46, which is beyond having completed a master's degree (ed. level = 9), that women's median earnings are as much or more than men's with each unit increase in education. This finding also holds in model 2, without interaction terms, where males have an estimated median earnings 3.07 ($e^{1.121}$) times higher than females (p-value < 0.01) (see **Plot B**). There is also an interactive effect between education level and race. For the White group, each unit increase in education is associated with a 0.81  ($e^{-0.212}$) multiplicative change in median earnings as compared to the Black group (p-value < 0.01). As **Plot E** shows, this means that people in the Black group earn more with each unit increase in education than those in the White group. However, it is only at education = 6.79, or almost having completed college (=7), that those in the Black group earn more than those in the White group. This finding also holds in model 2, without interaction terms, where those in the White group have an estimated median earnings 1.29 ($e^{0.251}$) times higher than those in the Black group (p < 0.5). However, the interaction between education and "other" race is not statistically significantly associated with earnings in model 3 (p > .05), though "other" race _is_ statistically significantly associated with an increase in median earnings as compared to the Black group _without_ interaction terms (by 2.19 times in model 2, and by 5.86 times in model 3, p-value < 0.01 for both estimates) (see **Plot C** for the association between race and earnings from model 2). For those enrolled at wave 4, median earnings are estimated to change by a multiplicative factor of 0.79 ($e^{-0.235}$) for each unit increase in education as compared to the unenrolled (p-value < 0.01). This means that the enrolled group's estimated median earnings are roughly 20% less with each unit increase in education level as compared to the unenrolled. For those who report an education level at wave 4 of 5.07 or higher (the equivalent of completing vocational training after high school), being unenrolled predicts higher earnings than being enrolled. This may indicate that the enrolled group is sacrificing current earnings for education. This result also holds in model 2, where being enrolled is associated with a multiplicative change in median earnings of 0.74 ($e^{-0.306}$) as compared to not being enrolled. Finally, for each unit increase in education, being born a US citizen is associated with a 1.39 ($e^{0.327}$) -fold increase in estimated median earnings as compared to not being born a US citizen. For a college graduate (education = 7), this translates into median earnings 3.45 times greater for a born US citizen than a non-citizen. (See Appendix for additional plots).  The estimates from the full model are similar to the estimates from the preferred model, with similar statistical significance. 
+
+```{r math, include = FALSE}
+# At what level of education in model 3 do women start earning more than men?
+    # 1 = e^(2.800 + (-0.296* ed))
+    # log(1) = (2.800 + (-0.296* ed))
+    # 0 = 2.800 + (-0.296* ed)
+    # 0.296 * ed = 2.800
+    # ed = 9.459
+
+
+# At what level of education in model 3 to Black people start earning more than White people?
+    # 1 = exp(1.44 + (-0.212 * ed))
+    # 0 = 1.44 + (-0.212 * ed)
+    # 0.212 * ed = 1.44
+    # ed = 6.79
+    
+# At what level of education do the enrolled earn more than the unenrolled? 
+    # 1 = exp(1.192 + (-0.235*ed))
+    # 0 = 1.192 + (-0.235*ed)
+    # 0.235 * ed = 1.192
+    # ed = 5.07
+
+# increase in median earnings for college grads born citizens: 
+# exp(-1.052 + 0.327(7))
+```
+
+
+```{r prep-for-plot-models, include = FALSE}
+
+plot_bivariate <- sjPlot::plot_model(
+    model = mod2, 
+    type = "pred", 
+    terms = c("work_nonsummer")
+    ) +
+    labs(title = "A. Log Earnings vs. Work Status (Model 3)",
+          x = "Work wave 1", 
+          y = "Log Earnings (wave 4)") +
+    theme(plot.title = element_text(size = rel(1.8)), 
+          axis.title = element_text(size = 20), 
+          axis.text.x = element_text(size = 15))
+
+plot_sex <- sjPlot::plot_model(
+    model = mod2_noint, 
+    type = "pred", 
+    terms = c("sex_fct", "work_nonsummer")) +
+    labs(title = "B. Log Earnings vs. Sex (Model 2)", 
+          x = "Sex", 
+          y = "Log Earnings (wave 4)", 
+         color = "Work") +
+    theme(plot.title = element_text(size = rel(1.8)), 
+          axis.title = element_text(size = 20), 
+          axis.text.x = element_text(size = 15),
+          legend.title= element_text(size = 15),
+          legend.text= element_text(size = 12), 
+          legend.key.size= unit(0.5, 'cm'))
+
+plot_race <- sjPlot::plot_model(
+    model = mod2_noint, 
+    type = "pred", 
+    terms = c("race_fct", "work_nonsummer"))+
+    labs(title = "C. Log Earnings vs. Race (Model 2)",
+          x = "Race", 
+          y = "Log Earnings (wave 4)", 
+         color = "Work")+
+    theme(plot.title = element_text(size = rel(1.8)), 
+          axis.title = element_text(size = 20), 
+          axis.text.x = element_text(size = 15),
+          legend.title= element_text(size = 15),
+          legend.text= element_text(size = 12), 
+          legend.key.size= unit(0.5, 'cm'))
+
+plot_enrolled <- sjPlot::plot_model(
+    model = mod2_noint,
+    type = "pred",
+    terms = c("enrolled", "work_nonsummer")
+) +
+    labs(title = "Log Earnings vs. Enrollment (Model 2)",
+        x = "Enrolled at wave 4",
+         y = "Log Earnings (wave 4)")
+
+plot_citizen <- sjPlot::plot_model(
+    model = mod2_noint, 
+    type = "pred", 
+    terms = c("citizen_fct", "work_nonsummer")
+) + 
+    labs(title = "Log Earnings vs. Citizenship (Model 2)",
+        x = "Born US Citizen", 
+         y = "Log Earnings (wave 4)", 
+        color = "Work")
+
+
+plot_sex_ed <- sjPlot::plot_model(
+    model = mod2, 
+    type = "pred", 
+    terms = c("ed_level", "sex_fct")
+) + 
+    labs(x = "Education Level", 
+         y = "Log Earnings (wave4)", 
+         color = "Sex", 
+         title = "D. Education x Sex (Model 3)")+
+    theme(plot.title = element_text(size = rel(1.8)), 
+          axis.title = element_text(size = 20), 
+          axis.text.x = element_text(size = 15),
+          legend.title= element_text(size = 15),
+          legend.text= element_text(size = 12), 
+          legend.key.size= unit(0.5, 'cm'))
+
+plot_race_ed <- sjPlot::plot_model(
+    model = mod2, 
+    type = "pred", 
+    terms = c("ed_level", "race_fct")
+) + 
+    labs(x = "Education Level", 
+         y = "Log Earnings (wave 4)", 
+         color = "Race", 
+         title = "E. Education x Race (Model 3)")+
+    theme(plot.title = element_text(size = rel(1.8)), 
+          axis.title = element_text(size = 20), 
+          axis.text.x = element_text(size = 15),
+          legend.title= element_text(size = 15),
+          legend.text= element_text(size = 12), 
+          legend.key.size= unit(0.5, 'cm'))
+
+plot_enrolled_ed <- sjPlot::plot_model(
+    model = mod2, 
+    type = "pred", 
+    terms = c("ed_level", "enrolled")
+) + 
+    labs(x = "Education Level", 
+         y = "Log Earnings (wave 4)", 
+         color = "Enrollement Status \n at wave 4",
+         title = "Education x Enrollment (Model 3)")
+
+
+plot_citizen_ed <- sjPlot::plot_model(
+    model = mod2, 
+    type = "pred", 
+    terms = c("ed_level", "citizen_fct")
+) + 
+    labs(x = "Education Level", 
+         y = "Log Earnings (wave 4)", 
+         title = "Education x Citizen (Model 3)", 
+         color = "Citizen")
+```
+
+```{r first-plot-grid, echo=FALSE, out.width = "35%", out.height = "40%"}
+plot_bivariate
+plot_sex
+plot_race
+
+```
+
+```{r second-plot-grid, echo=FALSE, out.width="45%", out.height="40%"}
+plot_sex_ed
+plot_race_ed
+```
+
+
+
+## Discussion: 
+
+There are several limitations to this study. First, self-reported answers may not be accurate, and may bias the results in unknown ways. Students may under- or over- report working hours or earnings, and more objective measures would be preferable for further research than self-report. Second, missing data, especially for working hours and earnings, may have biased the results in unknown ways, though the chance is small as the number of missing entries was small. Third, this report only looked at the "treatment" of working 10 + hours per week vs. the "control" of working less than 10 hours per week as a way to evaluate the effects of employment on future earnings. However, it may be that hours worked has a continuous effect on future earnings, and further studies could determine whether fewer or more hours of work per week have different effects. Fourth, future studies could determine if different types of employment have different effects on future earnings (a topic that was not possible with the Add Health survey here, which only asked about paid work in general). Fifth, we only looked at reported work status at wave 1, but this misses students who may have begun working later in high school. Future studies could consider the total amount of work done in high school. Finally, we cannot say that the association between the explanatory variables and earnings at wave 4 were causal. Although the CBPS weighting procedure mimics random sampling by creating treatment and control groups that are balanced on the observed variables, and therefore gets us closer to being able to infer causality, it is still possible that the two groups were unbalanced on unobserved variables which could act as confounders, predisposing subjects to both work during high school and have higher earnings after high school. Since the subjects were drawn from a representative sample of high schools around the United States, the results are generalizable to U.S. adolescents ages 14 - 20 in 1994-1995, who were 25-32 when earnings were measured in 2008-2009. 
+
+## Conclusion
+
+We find evidence that working 10 or more hours per week in high school is associated with higher earnings roughly 14 years later at wave 4. In all four models considered here, working during high school was associated with median earnings roughly 1.3 times higher at wave 4 than the earnings of those who did not work at wave 1. This result was robust whether working status was the only explanatory variable and when a number of other variables such as sex, race, family income, citizenship, education level, enrollment status at wave 4, and health were controlled for. This finding was also robust across three of four matching methods, indicating it is likely not driven by the balance of the data. These results undermine the hypothesis that working moderate to large numbers of hours during high school is associated with negative effects on future earnings. In the models which included control variables, earnings was also statistically significantly associated with education level, sex, race, enrollment status, family income at wave 1, and health at waves 1 and 4, though it was not statistically significantly associated with whether the respondent worked during the summer or the respondent's age. In the preferred model, there were also statistically significant interaction effects between education level at wave 4 and sex, race, enrollment status, and citizenship status, indicating that education has different effects on earnings depending on those variables. While the data were matched using CBPS to obtain treatment and control groups that were similar on all observed covariates, which mimics random sampling and brings us closer to inferring a causal relationship between working and higher future earnings, we still cannot say definitively that the relationship was causal, as there may be unobserved characteristics that were not evenly distributed between the treatment and control group which may have driven the results. 
+
+
+
+\newpage 
+## Bibliography: 
+
+**Data**: 
+
+* Harris, Kathleen Mullan, and Richard J. Udry. 2018. "National Longitudinal Study of Adolescent to Adult Health (Add Health), 1994-2008 [Public Use]," Carolina Population Center, University of North Carolina-Chapel Hill [distributor], Inter-university Consortium for Political and Social Research [distributor], 2018-08-06. https://doi.org/10.3886/ICPSR21600.v21
+
+**Software**:
+
+* Dahl, David B., David Scott, Charles Roosen, Arni Magnusson and Jonathan Swinton.
+  2019. xtable: Export Tables to LaTeX or HTML. R package version 1.8-4.
+  https://CRAN.R-project.org/package=xtable
+  
+* Fong, Christian, Marc Ratkovic and Kosuke Imai. 2021. CBPS: Covariate Balancing
+Propensity Score. R package version 0.22. https://CRAN.R-project.org/package=CBPS
+ 
+ * Greifer, Noah. 2020. Cobalt: Covariate Balance Tables and Plots. R package
+version 4.2.4. https://CRAN.R-project.org/package=cobalt
+
+* Hlavac, Marek. 2018. stargazer: Well-Formatted Regression and Summary Statistics Tables. R package version 5.2.1. https://CRAN.R-project.org/package=stargazer
+  
+* Honaker, J., King, G., Blackwell, M. 2011. “Amelia II: A Program for Missing Data.” Journal of Statistical Software, 45(7), 1–47. http://www.jstatsoft.org/v45/i07/.
+
+* Lüdecke, D. 2021. _sjPlot: Data Visualization for Statistics in Social Science_. R
+package version 2.8.7, <URL: https://CRAN.R-project.org/package=sjPlot>.
+
+**Scholarly Sources:** 
+
+* Carr, Rhoda V., James D. Wright, and Charles J. Brody. 1996. "Effects of High School Work Experience a Decade Later: Evidence from the National Longitudinal Survey."  _Sociology of Education_ 69: 66-81. 
+
+* Cunnien, Keith A., Nicole MartinRogers adn Jeylan T. Mortimer. 2009. "Adolescent work experience and self-efficacy." _International Journal of Sociology and Social Policy_ 29, no 3/4: 164-175. 
+
+* DeSimone, Jeff. 2006. "Academic performance and part-time employment among high school seniors." _The B.E. Journal of Economic Analysis & Policy_ 6, no. 10:1466
+
+* Dickler, Jessica. 2019. "Why so few teenagers have jobs anymore." _CNBC_ Oct. 6, 2019. 
+
+* Lee, Chanyoung and Peter F. Orazem. 2010. "High school employment, school performance and college entry." _Economics of Education Review_ 29, no. 1: 29-39.
+
+* Ruhm, Christopher J. 1997. "Is high school employment consumption or investment?" _Journal of Labor Economics_ 15, no. 4:735–776
+
+* Staff, Jeremy, and Christopher Uggen. 2003. "The Fruits of Good Work: Early Work Experiences and Adolescent Deviance." _Journal of Research in Crime and Delinquency_ 40, no. 3: 263-290. 
+
+\newpage
+# Appendix: 
+
+## Coding for Education Level at wave 4: 
+
+**Table 3** Shows the coding for the education level variable at wave 4.
+```{r appendix-ed-coding, include = FALSE}
+
+value_ed <- c(1:11)
+label_ed <- c("8th grade or less", "Some high school", "High school graduate", 
+              "Some vocational/technical training (after high school)", 
+              "Completed vocational/technical training (after high school)", 
+              "Some college", "Completed college (bachelor's degree)", 
+              "Some graduate school OR some post baccalaureate professional education", 
+              "Completed a master's degree OR completed post baccalaureate professional education", "Some graduate training beyond a master's degree", "Completed a doctoral degree")
+ 
+ed_variable <- data.frame("label" = label_ed, "value" = value_ed)
+```
+
+```{r appendix-ed-variable-table, echo=FALSE, results = "asis"}
+ed_variable %>% 
+    xtable::xtable(caption = "Respondent's Education Level at Wave 4") %>% 
+    print(type = "latex", 
+          table.placement = "!h", 
+          include.rownames = FALSE)
+```
+
+
+
+## Missingness: 
+
+The following show missingess before removing NA's in explanatory and outcome variables:
+```{r appendix-missing-data, echo=FALSE, results = "asis"}
+# Missingness before removing NA's in explanatory and outcome variables: 
+
+ahfull_recoded_smaller %>% select(-c(pay_bills, pubassist, parent1employed,
+                                     parent2employed, resmomed, resdaded, 
+                                     parent1ed, parent2ed, 
+                                     earningsNA, log_earnings_guess)) %>% 
+    naniar::miss_var_summary() %>% 
+    xtable::xtable(caption = "Missingness before removing missing outcome and explanatory variables") %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+                      
+```
+
+```{r appendix-missing-data-plot, echo=FALSE, fig.cap = "Missingness before removing missing outcome and explanatory variables.", out.width="50%"}
+ahfull_recoded_smaller %>% select(-c(pay_bills, pubassist, parent1employed,
+                                     parent2employed, resmomed, resdaded, 
+                                     parent1ed, parent2ed, 
+                                     earningsNA, log_earnings_guess)) %>% 
+    naniar::gg_miss_var()
+```
+
+The following show missingness after removing NA's in explanatory and outcome variables: 
+```{r appendix-missing-data-2, echo=FALSE, results = "asis"}
+# Visualize missingness after removing missing explanatory variables: 
+ahfull_complete %>% select(-c(pay_bills, parent2employed, parent1employed, 
+                              parent2ed, parent1ed, resdaded, resmomed,
+                              pubassist, earningsNA,
+                              log_earnings_guess)) %>% 
+    naniar::miss_var_summary() %>% 
+    xtable::xtable(caption = "Missingness after removing missing outcome and explanatory variables") %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+                      
+```
+
+```{r appendix-missing-2, echo= FALSE, fig.cap = "Missingness after removing missing outcome and explanatory variables, before imputing with Amelia.", out.width= "50%"}
+ahfull_complete %>% select(-c(pay_bills, parent2employed, parent1employed, 
+                              parent2ed, parent1ed, resdaded, resmomed,
+                              pubassist, earningsNA, log_earnings_guess)) %>% 
+    naniar::gg_miss_var()
+```
+
+We preferred to impute missing earnings by including the variable for estimated earnings in Amelia rather than removing all missing earnings entirely (though we removed entries where both earnings and estimated earnings were missing). This is because we suspected that the missing entries were not random, as the following plots show
+
+
+```{r appendix-imbalance-earnings, echo=FALSE, out.width = "50%"}
+
+ggplot(ahfull_recoded_smaller) + 
+    aes(x = log_income, color = is.na(log_earnings))+
+    geom_density()+
+    labs(title = "Distribution of log Income by Earnings NA \nbefore Imputation", 
+         x = "Log Income", 
+         color = "earnings NA")
+
+ggplot(ahfull_recoded_smaller) + 
+    aes(x = ed_level, color = is.na(log_earnings))+
+    geom_density()+
+    labs(title = "Distribution of Education Level (w. 4) by Earnings NA \nbefore Imputation", 
+         x = "Education Level (wave 4)", 
+         color = "earnings NA")
+
+earnings_missing_plot <- ahfull_recoded_smaller[!is.na(ahfull_recoded_smaller$work_nonsummer), ]
+
+ggplot(earnings_missing_plot) + 
+    aes(x = work_nonsummer, fill = is.na(log_earnings))+
+    geom_bar(position = "fill")+
+    labs(title = "Work Status by Earnings NA \nbefore Imputation", 
+         x = "Work Status", 
+         color = "earnings NA")
+
+ggplot(ahfull_recoded_smaller) + 
+    aes(x = enrolled, fill = is.na(log_earnings))+
+    geom_bar(position = "fill")+
+    labs(title = "Enrolled at wave 4 by Earnings NA \nbefore Imputation", 
+         x = "Enrolled (wave 4)", 
+         color = "earnings NA")
+```
+The following show missingness after imputation with Amelia:
+```{r appendix-missing-data-3, echo=FALSE, results = "asis"}
+
+naniar::miss_var_summary(ah_imputed_smaller) %>% 
+    xtable::xtable(caption = "Missingness after imputation with Amelia") %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+```
+
+```{r appendix-missing-3-plot, echo = FALSE, fig.cap = "Missingness after imputation with Amelia", out.width = "50%"}
+naniar::gg_miss_var(ah_imputed_smaller)
+
+```
+
+## Matching methods:
+As the following plots show, the working and non-working groups were imbalanced in several variables before matching.
+
+```{r appendix-visualize-imbalance, include = FALSE}
+
+## Before matching, visualize imbalance in the data: 
+
+plot_age_imbalance <- ggplot(ah_codebook) + 
+    aes(x = as.factor(age_full), fill = work_nonsummer) +
+    geom_bar(position = "fill")+
+    labs(title = "Age by Work Status", 
+         x = "Age at wave 1", 
+         y = "Density", 
+         fill = "Work status")
+
+plot_balance_summer_work <- ggplot(ah_codebook) + 
+    aes(x = work_summer, fill = work_nonsummer) +
+    geom_bar(position = "fill") + 
+    labs(title = "Summer Work by \nNon-Summer Work Status",
+         x = "Summer Work", 
+         y = "Relative Frequencies",
+         fill = "Non-summer Work Status")
+
+plot_balance_sex <- ggplot(ah_codebook) +
+    aes(x = sex_fct, fill = work_nonsummer) + 
+    geom_bar(position = "fill") + 
+    labs(title = "Sex by \nNon-Summer Work Status", 
+         x = "Sex", 
+         fill = "Work Status")
+
+plot_balance_race <- ggplot(ah_codebook) +
+    aes(x = race_fct, fill = work_nonsummer) + 
+    geom_bar(position = "fill") + 
+    labs(title = "Race by \nNon-Summer Work Status", 
+         x = "Race", 
+         fill = "Work Status")
+
+# One person with imputed health1 not a whole number; recode as whole num to plot: 
+
+ah_codebook1 <- ah_codebook %>% mutate(
+    health1 = ifelse((health1 < 3.8 | health1 > 3.9), health1, 4)
+)
+
+plot_balance_health1 <- ggplot(ah_codebook1) +
+    aes(x = as.factor(health1), fill = work_nonsummer) + 
+    geom_bar(position = "fill") + 
+    labs(title = "Health at wave 1 by \nNon-Summer Work Status", 
+         x = "Health at wave 1", 
+         fill = "Work Status")
+
+
+plot_balance_health2 <- ggplot(ah_codebook) +
+    aes(x = as.factor(health4), fill = work_nonsummer) + 
+    geom_bar(position = "fill") + 
+    labs(title = "Health at wave 4 by \nNon-Summer Work Status", 
+         x = "Health at wave 4", 
+         fill = "Work Status")
+
+plot_balance_citizen <- ggplot(ah_codebook) +
+    aes(x = citizen_fct, fill = work_nonsummer) + 
+    geom_bar(position = "fill") + 
+    labs(title = "Born a US Citizen by \nNon-Summer Work Status", 
+         x = "Born US Citizen?", 
+         fill = "Work Status")
+
+plot_balance_ed_level <- ggplot(ah_codebook)+
+    aes(x = ed_level, color = work_nonsummer)+
+    geom_density()+
+    labs(title = "Educational Attainment by \nNon-Summer Work Status", 
+         x = "Educational Attainment at wave 4", 
+         y = "Density", 
+         color = "Work Status at wave 1")
+
+plot_balance_enrolled <- ggplot(ah_codebook) +
+    aes(x = enrolled, fill = work_nonsummer) + 
+    geom_bar(position = "fill") + 
+    labs(title = "Enrolled at Wave 4 by \nNon-Summer Work Status", 
+         x = "Enrolled at Wave 4", 
+         fill = "Work Status at Wave 1")
+
+plot_balance_income <- ggplot(ah_codebook)+
+    aes(x = log_income, color = work_nonsummer)+
+    geom_density()+
+    labs(title = "Family log(Income), Wave 1 by \nNon-Summer Work Status", 
+         x = "Family Income, Wave 1", 
+         y = "Density", 
+         color = "Work Status")
+```
+
+```{r appendix-imbalance-plots, echo=FALSE, out.width = "50%"}
+
+plot_balance_income
+plot_balance_ed_level
+plot_balance_enrolled 
+plot_balance_citizen 
+plot_balance_summer_work 
+plot_balance_health1 
+plot_balance_health2 
+plot_balance_race
+plot_balance_sex
+
+```
+
+```{r cobalt-love-plots, include = FALSE}
+library(cobalt)
+
+new.names = c(work_summer = "Summer Work", 
+              age_full = "Age Wave 1",
+              sex_fct_male = "Sex: Male", 
+              race_fct_black = "Race: Black", 
+              race_fct_other = "Race: Other", 
+              race_fct_white = "Race: White", 
+              health1 = "Health Wave 1", 
+              health4 = "Health Wave 4", 
+              citizen_fct = "Born US Citizen", 
+              ed_level = "Highest Education Level", 
+              enrolled = "Enrolled Wave 4", 
+              log_income = "Family Income Wave 1")
+
+nn_plot <- cobalt::love.plot(nn_out, 
+                  title = "Nearest Neighbor Matching", 
+                  stars = "raw",
+                  var.names = new.names)
+
+maha_plot <- cobalt::love.plot(maha_out, 
+                  title = "Mahalanobis Matching", 
+                  stars = "raw",
+                  var.names = new.names)
+
+subclass_plot <- cobalt::love.plot(subclass_out, 
+                  title = "Subclassification Matching", 
+                  stars = "raw",
+                  var.names = new.names)
+
+cbps_plot <- cobalt::love.plot(cbps_out, 
+                  title = "CBPS Matching",
+                  stars = "raw",
+                  var.names = new.names)
+```
+The following show the balance of the covariates using four matcihng methods: 
+```{r cobalt-plots-visualized, echo=FALSE, out.width = "50%"}
+nn_plot
+maha_plot
+subclass_plot
+cbps_plot
+```
+
+The following table shows linear regression using the four matching methods:
+```{r regressions-with-matching-methods, include = FALSE}
+# Linear regressions with four matching models to assess robustness to matching:
+
+# Dataframes: 
+nn_match <- match.data(nn_out)
+maha_match <- match.data(maha_out)
+subclass_match <- match.data(subclass_out)
+
+# models: 
+lm_nn <- lm(log_earnings ~ work_nonsummer + ed_level + sex_fct + race_fct + enrolled + age_full + citizen_fct + health4 + health1,  
+                  data = nn_match)
+summary(lm_nn)
+
+lm_maha <- lm(log_earnings ~ work_nonsummer + ed_level + sex_fct + race_fct + enrolled + age_full + citizen_fct + health4 + health1, 
+            data = maha_match)
+summary(lm_maha)
+
+lm_subclass <- lm(log_earnings ~ work_nonsummer + ed_level + sex_fct + race_fct + enrolled + age_full + citizen_fct + health4 + health1, 
+            data = subclass_match, 
+            weights = weights)
+summary(lm_subclass)
+
+lm_cbps <- lm(log_earnings ~ work_nonsummer + ed_level + sex_fct + race_fct + enrolled + age_full + citizen_fct + health4 + health1, 
+              data = ah_imputed_smaller, 
+              weights = cbps_weights)
+
+summary(lm_cbps)
+
+```
+
+```{r stargazer-matching-models, echo=FALSE, results = "asis"}
+stargazer(lm_nn, lm_maha, lm_subclass, lm_cbps, 
+          font.size = "footnotesize", 
+          title = "Log Earnings wave 4 vs. Work Status wave 1 using Different Matching Methods", 
+          omit.stat = c("f", "ser"), 
+          type = "latex", 
+          header = FALSE, 
+          no.space= TRUE,
+          table.placement = "!h", 
+          dep.var.labels= "Log Earnings at wave 4", 
+          covariate.labels= c("Work:yes", "Sex:Male", "Race:other", "Race:white", 
+                              "Enrolled:yes", "Age", "Health w.4", "Health w.1", 
+                              "Constant"),
+          column.labels= c("Nearest Neighbor", "Mahalanobis", "Subclassification", "CBPS")
+)
+```
+
+
+## Diagnostic Plots for Assumptions of Linear Regression:
+
+```{r appendix-assumptions-lr, echo=FALSE}
+
+
+par(mfrow=c(2,2))
+plot(mod2)
+
+# potential outliers: 
+# 3559
+# 719
+# 1292
+# 2198
+# 3482
+# 1414?
+```
+
+```{r explore-outliers, echo=FALSE, out.width="50%"}
+hist(mod2$residuals, 
+     main = "Histogram of Residuals", 
+     xlab = "Residuals")
+
+hist(ah_imputed_smaller$log_earnings, 
+     main = "Histogram of Log Earnings", 
+     xlab = "Log Earnings")
+
+hist(ah_imputed_smaller$age_full, 
+     main = "Histogram of Age", 
+     xlab = "Age")
+
+hist(ah_imputed_smaller$ed_level, 
+     main = "Histogram of Education Level",
+     xlab = "Ed. Level wave 4")
+
+hist(ah_imputed_smaller$log_income,
+     main = "Histogram of Log Income w. 1", 
+     xlab = "Log Income wave 1")
+
+hist(ah_imputed_smaller$health1,
+     main = "Histogram of Health w. 1", 
+     xlab = "Health wave 1")
+
+hist(ah_imputed_smaller$health4,
+     main = "Histogram of Health w. 4", 
+     xlab = "Health wave 4")
+
+
+# who are the outliers? 
+# ah_imputed_smaller[c(3559, 719, 1292, 2198, 3482, 1414), ]
+
+```
+
+## Additional Plots of Model Variables: 
+The following are additional plots of control variables in model 2 and interaction terms in model 3. 
+```{r appendix-race-plots, echo=FALSE, out.width = "50%"}
+plot_race
+plot_race_ed
+
+plot_citizen
+plot_citizen_ed
+
+plot_enrolled
+plot_enrolled_ed
+```
+
+## ANOVA to select best models: 
+
+```{r anova-select-models, include = FALSE}
+## Working down: 
+fullv1 <- anova(modfull_int, mod1) # can take out summer work
+mod1v2 <- anova(mod2, mod1) # can take out income 
+mod2v3 <-anova(mod3, mod2) # can't take out age (p = 0.026)
+mod2v4 <-anova(mod4, mod2) # can't take out health1
+mod2v5 <-anova(mod5, mod2) # can't take out health 4
+mod2v6 <- anova(mod6, mod2) # can't take out ed*citizen
+mod2v7 <- anova(mod7, mod2) # can't take out ed*enrolled
+mod2v8 <- anova(mod8, mod2) # can't take out ed*race
+mod2v9 <-anova(mod9, mod2) # can't take out ed*sex
+
+# summary: 
+modsimplev2noint <- anova(mod_simple, mod2_noint) # preferred no int's better than simple
+mod2nointv2 <- anova(mod2_noint, mod2) # interactions better
+mod2vfull <- anova(mod2, modfull_int) # full model no better than preferred
+```
+
+The following tables show how the preferred model (model 3 in **Table 2**) is better than the preferred model without interaction terms (model 2), which is better than the simple model (model 1), but that the full model (model 4) is no better than the preferred model (model 3).
+```{r simple-anova-tables, echo=FALSE, results = "asis"}
+modsimplev2noint %>% 
+    xtable::xtable(
+        caption = "Model 1 vs. Model 2"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+
+mod2nointv2 %>% 
+    xtable::xtable(
+        caption = "Model 2 vs. Model 3"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+
+mod2vfull %>% 
+    xtable::xtable(
+        caption = "Model 3 vs. Model 4"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+
+```
+
+The following tables show how the preferred model was selected by removing variables one at a time from the full model until removing more variables decreased the explanatory power of the model. 
+```{r anova-tables, echo=FALSE, results = "asis"}
+
+fullv1 %>% 
+    xtable::xtable(
+        caption = "Full model vs. Remove Summer Work"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+
+mod1v2 %>% 
+    xtable::xtable(
+        caption = "Full model - summer work vs. - income") %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+
+
+mod2v3 %>% 
+     xtable::xtable(
+        caption = "Preferred model vs. - Age, Can't take out age"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+    
+mod2v4 %>% 
+    xtable::xtable(
+        caption = "Preferred model vs. - Health 1, Can't take out health1"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+mod2v5 %>% 
+    xtable::xtable(
+        caption = "Preferred model vs. - Health 4, Can't take out health4"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+
+mod2v6 %>% 
+    xtable::xtable(
+        caption = "Preferred model vs. - Ed x Citizen, Can't take out Ed x Citizen"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+
+mod2v7 %>% 
+    xtable::xtable(
+        caption = "Preferred model vs. - Ed x Enrolled, Can't take out Ed x Enrolled"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+
+mod2v8 %>% 
+    xtable::xtable(
+        caption = "Preferred model vs. - Ed x Race, Can't take out Ed X Race"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+
+mod2v9 %>% 
+    xtable::xtable(
+        caption = "Preferred model vs. - Ed x Sex, Can't take out Ed X Sex"
+    ) %>% 
+    print(type = "latex", 
+          table.placement = "!h")
+
+```
+
+
+
+
+

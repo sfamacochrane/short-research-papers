@@ -1,0 +1,819 @@
+---
+title: "Report 3: Education and Approval of Clinton's 1993 Health Plan"
+author: |
+  | Sally Cochrane
+  | Due: April 12th, 11:59pm (Monday)
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+header-includes: \usepackage{float} \floatplacement{figure}{h}
+indent: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo    = TRUE,
+	message = FALSE,
+	warning = FALSE,
+	fig.pos = "H"
+)
+options(digits = 3)
+set.seed(1234567)
+
+library(haven)
+library(dplyr)
+library(arsenal)
+library(kableExtra)
+library(ggplot2)
+library(xtable)
+options(xtable.comment = FALSE)
+library(stargazer)
+library(sjPlot)
+
+```
+
+### 1 Introduction
+Did educational attainment influence attitudes toward Clinton's 1993 health care reform plan? Legerski and Berg (2018), studying the 2010 Affordable Care Act (ACA), found that higher education decreased the chance of opposing the ACA overall, but that Republicans with more education opposed the plan _more_ than their less-educated counterparts. Did this association hold for a similar government-sponsored health plan back in 1993? Some scholars argue that education is generally liberalizing because it increases social tolerance (Sniderman, Brody, and Tetlock, 1993), meaning more education might be associated with more support for such a liberal social-welfare policy. However, other scholars find that education has little effect on policy attitudes because it merely helps people justify their previously-held beliefs (Federico, 2004). Still others argue that education _decreases_ support for redistributive policies, hypothesizing that education leads to higher incomes, which voters then want to protect (Bullock, 2020). Using data from the American National Election Survey in 1994, we use logistic regression to evaluate how educational attainment was associated with approval of Clinton's handling of health care reform. We find evidence consistent with the theory that more education is associated with less support for a redistributive social welfare plan, but also find moderate evidence that previously-held beliefs are significantly associated with policy views, regardless of education.
+
+### 2 Theory
+Some scholars hypothesize that education teaches people about social inequalities and therefore increases the chance that they hold more liberal views on policies that would help disadvantaged groups. Sniderman, Brody, and Tetlock (1993) dub this the "main effect" of education, and find that education increased tolerance toward homosexuals during the AIDS crisis. Similarly, Peterson (2002) finds that education liberalizes attitudes toward elective abortion among the religious, and Kingston et al. (2003) find that education increases support for gender equality and civil liberties. If this first school of thought is correct, we would expect that increasing education would be associated with a higher probability of approving of Clinton's handling of health care reform, as Clinton's plan provided health care subsidies to the disadvantaged. Other scholars, however, argue that higher educational attainment merely helps people better justify their previously-held views. Legerski and Berg's (2018) findings about the ACA indicate that education reinforced Republicans' politically-based attitudes. Similarly, Federico (2004) found that while more education was associated with more positive attitudes toward black people overall, more education made those with negative racial views _more_ opposed to welfare programs. If this second school of thought is correct, we would expect to see little or no association between education and approval for Clinton's health care reform once previously held beliefs such as party affiliation and/or racial intolerance were taken into account. Finally some scholars argue that education _decreases_ the chance of supporting liberal social welfare policies. Bullock (2020) finds that secondary education makes Americans more opposed to wealth redistribution, perhaps, he says, because education boosts income, and people then vote more conservatively to protect their wealth. 
+
+### 3 Data
+Data come from the 1994 American National Election post-election study, conducted between November 8 1994 and January 9 1995, with 1795 respondents. The outcome variable is the question, "Do you approve or disapprove of the way Bill Clinton is handling health care reform?" The 132 "don't know" responses were coded "NA" due to the small number (7.4% of the sample), and to create a binary outcome variable reflecting true approval or disapproval. The main explanatory variable is the question "What is the highest grade of school or year of college you have completed?", with 1 - 17+ indicating the number of years completed. This variable was kept numeric because we are interested in how increasing educational experience, rather than groups of people with a certain degree, is associated with policy views. An inherent limitation is the censored data beyond 17 years of education (coded as 17), with 106, or 10.3% of respondents, answering "17". Another limitation is that 761, or 42.4%, were _not_ asked this this question because they were part of a "panel" survey that received a slightly different questionnaire. However, excluding these non-respondents from the study is unlikely to introduce systematic bias because both groups were drawn from a cross-section of adult U.S. citizens. Analysis of the summary statistics of each variable in the responding and non-responding groups show they are similar in all other variables (see Appendix). Party affiliation was simplified to "Democrat," "Republican," and "Independent", with other responses coded "NA," as the number was small (126, or 7.02%). Race was simplified to "White", "Black", and "Other", as the number "Other" was small (38, or 2.12%). Family income was coded as a numeric scale from 1 (less than \$2,999) to 24 (\$105,000 and above). While the income scale does not increase in exactly equal increments, a continuous numeric variable was more appropriate than artificially-imposed categories, as income is likely to relate linearly to years of education. Finally, because scholarship on welfare and the 2010 ACA has indicated that racial resentment is an important predictor of opposition to these policies (Federico, 2004; Berkeley, 2020), four questions that comprised the "racial attitude scale" were averaged to form a new variable for racial hostility, ranging from 1 to 5 increasing hostility. (See Appendix for the full list of questions). **Table 1** shows summary statistics by approval for Clinton's health care reform. **Plot 1** shows approval/disapproval by years of education and shows number of respondents who completed each educational year.  
+
+
+```{r data-cleaning, include = FALSE}
+# Data format: DTA
+df <- read_dta("NES1994.dta")
+
+# Select relevant columns: 
+df_cleaned <- df %>% select(V940207, V941206, V940652, V940936, V941203, 
+                            V941435, V941404, V941434, V941048, V941049, 
+                            V941050, V941051
+                            )
+
+# Rename columns:
+df_cleaned <- df_cleaned %>% 
+    mutate(clinton_plan = as.numeric(V940207), 
+           education = as.numeric(V941206), 
+           party = as.factor(V940652), 
+           age = as.numeric(V941203), 
+           sex = as.factor(V941434),
+           race = as.factor(V941435), 
+           income = as.numeric(V941404),
+           attitude1 = as.numeric(V941048), 
+           attitude2 = as.numeric(V941049), 
+           attitude3 = as.numeric(V941050),
+           attitude4 = as.numeric(V941051), 
+    )
+
+## Re-code data: 
+df_cleaned <- df_cleaned %>% 
+    mutate(
+        clinton_plan_bin = case_when(
+            clinton_plan == 1 ~ 1, #1. APPROVE
+            clinton_plan == 5 ~ 0, #5. DISAPPROVE
+            TRUE ~ NA_real_), 
+        clinton_plan_fct = case_when(
+            clinton_plan == 1 ~ "APPROVE", 
+            clinton_plan == 5 ~ "DISAPPROVE", 
+            TRUE ~ NA_character_), 
+        clinton_plan_fct = forcats::fct_relevel(clinton_plan_fct, "DISAPPROVE"), 
+        education_num = case_when(
+            education >= 96 ~ NA_real_, 
+            TRUE ~ education), 
+        party_fct = case_when( 
+            party == 1 ~ "Republican", 
+            party == 2 ~ "Independent", 
+            party == 5 ~ "Democrat",
+            party == 3 | 
+                party == 4 |
+                party == 8 |
+                party == 9 ~ NA_character_), 
+        party_fct = forcats::fct_relevel(party_fct, c("Republican", "Democrat", "Independent")),
+        race_fct = case_when(
+            race == 1 ~ "White", 
+            race == 2 ~ "Black", 
+            race == 3 | 
+                race == 4 |
+                race == 9 ~ "Other"), 
+        race_fct = forcats::fct_relevel(race_fct, c("White", "Black", "Other")), 
+        sex_fct = case_when(
+            sex == 1 ~ "Male", 
+            sex == 2 ~ "Female", 
+            TRUE ~ NA_character_),
+        sex_fct = forcats::fct_relevel(sex_fct, c("Male", "Female")), 
+        income_num = case_when(
+            income < 25 ~ income,
+            income == 88 | income == 98 | income == 99 ~ NA_real_),
+        attitude1_scaled = case_when(
+            attitude1 < 8 ~ attitude1, 
+            TRUE ~ NA_real_),
+        # Reverse scale on attitude 2 question to be increasing hostility (see appendix):
+        attitude2_scaled = case_when(
+            attitude2 == 1 ~ 5, 
+            attitude2 == 2 ~ 4, 
+            attitude2 == 3 ~ 3, 
+            attitude2 == 4 ~ 2, 
+            attitude2 == 5 ~ 1, 
+            TRUE ~ NA_real_),
+        # Reverse scale on attitude 3 question to be increasing hostility (see appendix):
+        attitude3_scaled = case_when(
+            attitude3 == 1 ~ 5, 
+            attitude3 == 2 ~ 4, 
+            attitude3 == 3 ~ 3, 
+            attitude3 == 4 ~ 2, 
+            attitude3 == 5 ~ 1, 
+            TRUE ~ NA_real_),
+        attitude4_scaled = case_when(
+            attitude4 < 8 ~ attitude4, 
+            TRUE ~ NA_real_) 
+    )
+
+# Take the mean of all the "attitude" questions, label new var "hostility": 
+df_cleaned$hostility <- rowMeans(subset(df_cleaned, 
+                                        select = c(attitude1_scaled, 
+                                                   attitude2_scaled, 
+                                                   attitude3_scaled, 
+                                                   attitude4_scaled)), 
+                                 na.rm = TRUE)
+
+# Turn NaN's into NA's: 
+df_cleaned$hostility[is.nan(df_cleaned$hostility)] <- NA
+    
+
+# Save cleaned, recoded columns only: 
+df_cleaned_smaller <- df_cleaned %>% 
+         select(clinton_plan_bin, clinton_plan_fct, education_num, party_fct,
+                age, sex_fct, race_fct, income_num, hostility) 
+
+# Save as Data format: Rds (R data format)
+saveRDS(object = df_cleaned_smaller, file = "Report3data_SCochrane.rds")
+```
+
+```{r import-rds-file, include = FALSE}
+
+# Import rds file as dataframe, "anes":
+anes <- readRDS(file = "Report3data_SCochrane.rds")
+
+str(anes)
+```
+
+
+```{r summary-stats, include = FALSE}
+tab <- tableby( clinton_plan_fct ~ education_num + party_fct + race_fct + 
+                    sex_fct + age + income_num + hostility, 
+         data = anes, 
+         digits = 2, 
+         numeric.stats = c("Nmiss", "meansd"), 
+         numeric.simplify = TRUE) %>% 
+    summary(removeBlanks = TRUE)
+
+# save summary stats as a dataframe: 
+summary_stats <- as.data.frame(tab)
+
+```
+
+```{r table-summary-stats, echo=FALSE, results = "asis"}
+# Re-write variable name columns to get rid of "%nbsp" output in tableby: 
+
+summary_stats[ ,1] <- c("EDUCATION (YEARS)", "N-miss", "Mean (SD)","PARTY", "N-Miss", "Republican", "Democrat", "Independent", "RACE", "N-Miss", "White", "Black", "Other", "SEX", "Male", "Female","AGE (Mean(SD))", "INCOME LEVEL [1-24]", "N-Miss","Mean (SD)", "HOSTILITY [1-5 increasing]", "N-Miss", "Mean (SD)")  
+
+# Pipe dataframe into a kable table: 
+summary_stats %>% 
+    kable(
+        format = "latex", 
+        caption = "Summary Statistics by Approval of Clinton's Handling of Health Care Reform", 
+        booktabs = TRUE, 
+        digits = 2
+    ) %>% 
+    add_indent(positions = c(2,3,5,6,7,8,10,11,12,13,15,16,19,20)) %>% 
+    kable_styling(
+        full_width=F, bootstrap_options="striped", font_size=7)
+```
+
+### 4 Methods
+We used logistic regression because the outcome variable is binary. Most of the assumptions for logistic regression were met, though the linearity assumption may be violated (see the appendix for tests of the assumptions of logistic regression). Five models were compared using ANOVA. A simple bivariate model (1) was compared to a model that controlled for political party (2). Controlling for party was found to greatly improve the explanatory power of the model, with high statistical significance. Since the theory section indicated that education might have different effects by party affiliation, a different-slopes model (3) with the interaction between party and education was compared to the parallel-lines party model (2). This interaction model did not add statistically significant explanatory power (p = 0.063), so a fourth model (4) added a term for racial hostility to the parallel lines party model (2). This fourth model added a statistically significant amount of explanatory power when compared to the model controlling for party. The full model (5), which added controls for age, sex, race, and income, was not found to add significant explanatory power compared to model 4. (See appendix for ANOVA tables). Therefore, we selected the following model: 
+
+$$\log\left[ \frac { \widehat{P(Approve)} }{ 1 - \widehat{P(Approve)} } \right] = \beta_{0} + \beta_{1}*YearsEducation + \beta_{2-3}*Party + \beta_{4}*Hostility$$
+
+Where the coefficients are: 
+
+
+$$\log\left[ \frac { \widehat{P(Approve)} }{ 1 - \widehat{P(Approve)} } \right] = -0.078 - 0.067*YearsEducation + 1.960*Democrat + 1.260*Independent - 0.256*Hostility$$
+
+```{r models, include = FALSE}
+
+# Naive bivariate model: 
+mod_naive <- glm(clinton_plan_bin ~ education_num, 
+                 family = binomial, data = anes)
+
+# Party control model: 
+mod_party <- glm(clinton_plan_bin ~ education_num + party_fct,
+                 family = binomial, data = anes)
+
+# Party X Education model: 
+mod_interact <- glm(clinton_plan_bin ~ education_num + education_num*party_fct, 
+                    family = binomial, data = anes)
+
+# Party and racial hostility model: 
+mod_party_host <- glm (clinton_plan_bin ~ education_num + party_fct + hostility,
+                        family = binomial, data = anes)
+
+# Full model: 
+mod_full <- glm (clinton_plan_bin ~ education_num + party_fct + age + sex_fct +
+                     race_fct + income_num + hostility, 
+                  family = binomial, data = anes)
+
+```
+
+### 5 Results
+
+```{r calculate-odds-party-hostility, include = FALSE}
+## In the preffered model (party-hostility model #4):
+    # Education:
+exp(-0.067) # 0.935
+    # 95% CI: 
+exp(-0.067 + (1.96 *0.031))
+exp(-0.067 - (1.96 *0.031)) # CI: .88 to .994
+
+    # Going from college to high school: 
+exp(-0.067*(16-12)) # 0.765 ~ 3/4 the odds of approval
+    # Going from college to grade school: 
+exp(-0.067*(16-8)) # 0.585 ~ 3/5 the odds of approval
+
+    # Racial hostility: 
+exp(-0.256) #0.774
+    # 95% CI: 
+exp(-0.256 + (1.96 *0.088))
+exp(-0.256 - (1.96 *0.088)) # .651 to .92
+
+    # Party: 
+exp(1.96) # 7.1 - Democrats
+exp(1.26) # 3.53 - Independents
+```
+As **Table 2** shows, in the preferred model (4), when party and racial hostility are taken into account, each additional year of education is associated with the odds of approving of Clinton's handling of health care reform changing by a multiplicative factor of 0.935 (p-value less than 0.05, 95% confidence interval 0.88 to 0.99); i.e., the odds of approval are estimated to be 6.5% lower with each year of education. Therefore, holding party and racial hostility constant, the odds of someone with 16 years of education (college) approving are roughly 3/4 the odds (0.765) of someone with 12 years of education (high school), and only roughly 3/5 the odds (0.59) of someone with 8 years of education (junior high) approving. In this model, racial hostility is also statistically significantly associated with approval. If education and party are held constant, each unit increase in hostility is associated with the odds of approving changing by a multiplicative factor of 0.774 (p-value less than 0.01, 95% confidence interval 0.65 to 0.92); i.e., the odds of approval are 22.6% lower with each unit increase in racial hostility. When controlling for education and hostility, Democrats and Independents are much more likely to approve of Clinton's handling of health reform, with the odds of Democrats approving estimated to be 7.10 times greater than non-Democrats, and the odds of Independents approving estimated to be 3.53 times greater than non-Independents (p-value less than 0.01 for both of these estimates). **Plot 4** shows the marginal effect of racial hostility on predicted probability of approval, controlling for years of education and party affiliation.
+
+```{r calculate-for-interpretation, include = FALSE}
+## CALCULATIONS FOR INTERPRETATION: 
+
+## In the naive model (model 1): 
+    # Multiplicative factor for education:
+exp(-0.82) # 0.44
+1-0.44 # .56 = 56% less
+    # 95% CI:
+exp(-0.82 + (1.96 * 0.026))
+exp(-0.82 - (1.96 * 0.026)) # CI: 0.463 to 0.419
+
+
+## Party control model (model 2):
+    # party affiliation - Democrat: 
+exp(2.1) # 8.17 
+    # party affiliation -Independent: 
+exp(1.35) # 3.86
+
+
+## Party x Education model (model 3): 
+
+# logOdds = 0.632 -0.190*Ed + 0.159*Dem - 1.470*Ind + 0.146*(Ed x Dem) + 
+#           0.213(Ed x Ind)
+
+    # Calculate derivative logOdds/education give R/D/I:     
+# dlogodds/deducation | Republican = -0.190
+# dlogodds/deducation | Democrat = -0.190 + 0.146 = -0.044
+# dlogodds/deducation | Independent = -0.190 + 0.213 = 0.023
+
+    # Republicans: 
+exp(-0.190) # 0.827 = 17.3% lower odds for each year education
+    # Democrats: 
+exp(-0.044) # 0.957 = 4.3% lower odds for each year education
+    # Independents: 
+exp(0.023) # 1.02 = increased odds by multiplicative factor of 1.02
+    
+
+
+## Full model (5): 
+
+    # education:
+exp(-0.059) # 0.943
+    # 95% CI: 
+exp(-0.059 + (1.96*0.036))
+exp(-0.059 - (1.96*0.036)) # 0.878 to 1.01.
+
+```
+This relationship between education and approval was not robust across all models. In the bivariate model (1), the odds of approval decreased by a much greater magnitude with each additional year of education than in the preferred model (4), indicating that party affiliation and racial hostility were accounting for some, but not all, of the association between education and disapproval. In model 1, each added year of education is associated with the odds of approving changing by a multiplicative factor of 0.44 (p-value less than 0.01, 95% confidence interval 0.42 to 0.46); i.e., the odds are 56% lower for each added year of education. **Plot 2** shows the probability of approval by years of education alone (model 1). When party affiliation is controlled for (model 2), there is no longer a statistically significant relationship between education and approval, but there _is_ a statistically significant relationship between party affiliation and approval. Holding education constant, the odds of approval among Democrats was estimated to be 8.17 times greater than among non-Democrats, and the odds of approval among Independents was estimated to be 3.86 times greater than among non-Independents, with a p-value of less than 0.01 for both of these estimates. Education is again statistically significantly associated with approval when the interaction between party and education is taken into account (model 3): here, with each added year of education, Republicans have a 17.3% lower odds of approval; Democrats have a 4.3% lower odds of approval; and Independents have a 1.02 times greater odds of approval. The interaction between education and party is shown in **Plot 3**. Finally, when age, sex, race, and income are controlled for along with party and racial hostility, there is no evidence of an association between education and approval. As the data are observational, we cannot say that education, party, or racial hostility _causes_ a decreased chance of approving of Clinton's health care reform. Since the study sampled a cross-section of the American adult population in 1994, it is likely that these results generalize to the adult US population of 1994, though we cannot generalize these results to other years. Since the surveys were distributed by household, it is unlikely that serial or cluster effects biased the data.
+
+```{r stargazer-table, echo=FALSE, results = "asis"}
+
+ stargazer_labels <- c("Education (Years)", "Party: Democrat", "Party: Independent", 
+                      "EducationXDemocrat", "EducationXIndependent", "Age", 
+                      "Sex: Female", "Race: Black", "Race: Other", "Income Level", 
+                      "Racial Hostility", "Constant")
+
+stargazer(mod_naive, mod_party, mod_interact, mod_party_host, mod_full,
+          type="latex", 
+          header = FALSE, 
+          no.space = TRUE, 
+          column.sep.width="1pt", 
+          font.size="small", 
+          omit.stat = c("f", "ser"),
+          single.row=TRUE,
+          dep.var.labels = c("Log Odds of Approval for Clinton's Health Care Reform"), 
+          covariate.labels = stargazer_labels, 
+          title = "Models for Association bewteen Education and Approval"
+)
+
+```
+
+```{r plot-1, echo=FALSE, out.width="50%"}
+
+plot(clinton_plan_fct ~ education_num, data = anes, 
+     main = "Plot 1: Mosaic Plot of Approval by Years of Education", 
+     xlab = "Years of Education", 
+     ylab = "View of Clinton's Health Plan")
+
+sjPlot::plot_model(mod_naive, type = "pred", 
+           terms = c("education_num[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]")) +
+    ggtitle("Plot 2: Predicted probability of approval by education") +
+    ylab("Predicted probability of approval")+
+    xlab("Years of Education")
+```
+
+.
+
+```{r plots, echo=FALSE, out.width = "55%"}
+
+sjPlot::plot_model(mod_interact, type = "pred", 
+           terms = c("education_num[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]", "party_fct")) +
+    ggtitle("Plot 3: Predicted Probability of Approval by \nInteraction of Education and Party") +
+    ylab("Predicted probability of approval")+
+    xlab("Years of Education")+
+    labs(color = "Party")
+    
+sjPlot::plot_model(mod_party_host, type = "pred", 
+           terms = c("hostility[1,2,3,4,5]", "party_fct")) +
+    ggtitle("Plot 4: Marginal Effect of Racial Hostility on \nPredicted Probability of Approval, by Party Affiliation") +
+    ylab("Predicted probability of approval")+
+    xlab("Racial Hostility Scale, 1 to 5, increasing")+
+    labs(color = "Party")
+
+```
+
+### 6 Discussion
+There are several limitations to this study. First, the ANES survey questions do not precisely measure the variables from the theory section. For example, (dis)approval of Clinton's handling of health care reform may reflect opinions about Clinton himself, not just support for the reform plan. Similarly, the racial hostility measure may be biased by what the respondent thought the interviewer wanted to hear. There are also shortcomings of the data: education is censored after 17 years, so we cannot know how education beyond college relates to approval. We also cannot determine if increased education _causes_ decreased approval for Clinton's health care reform: other factors unobserved in this study may predispose someone to both get a higher level of education and to disapprove of Clinton's handling of health care reform. We cannot generalize this finding beyond 1994, as other factors, such as the national economy, may change the relationship in other years. Possible extensions of this study could explore: if there is an association between education and racial hostility, as both were found to predict approval; if self-identified race and racial hostility are highly correlated, because if so, they may be collinear in the full model; whether education or income is a better predictor for approval, as Bullock (2020) hypothesized; and whether this relationship held for other episodes in U.S. health care history, such as FDR's 1933 proposal for publicly funded health care. 
+
+### 7 Conclusion
+In the model that maximized explanatory power and parsimony, the odds of approving of Clinton's health care reform were moderately but statistically significantly lower with each additional year of education, holding party affiliation and a measure of racial hostility constant. These results undermine the hypothesis that education is generally "liberalizing," and support Berkeley's (2020) and Federico's (2004) theories that racial attitudes decrease support for social welfare programs such as government sponsored health care. In this model, increasing racial hostility was associated with lower odds of approval, holding education and party constant, and Democrats and Independents had a greater chance of approval than did Republicans of the same education and hostility measure. These results also lend some support to the hypothesis that education reinforces previously-held beliefs, because the amount by which each additional year of education lowered the odds of approval in this model was of a much smaller magnitude than the amount by which education lowered the odds of approval when education was taken as the sole explanatory variable, indicating that party and racial hostility explained a great deal, but not all, of the association between education and approval. The "reinforcing" theory of education is also supported by the fact that education has different effects according to party affiliation. When the interaction between education and party is considered, with more education only Independents have a slightly increased odds of approval; Democrats have a slightly lower odds of approval; and Republicans have much lower odds of approval. However, these results were not robust across all models, because when party alone or when a range of other demographic variables are controlled for, education is not statistically significantly associated with odds of approval. 
+
+\newpage
+### 8 Bibliography
+
+* American National Election Studies. 1994. ANES 1994 Post-Election Study: Post-Election Data [dataset and documentation]. www.electionstudies.org.
+
+* Berkeley, Franz, and Adrienne N. Milner. (2020). "Opposition to the Affordable Care Act has Little to do with Health Care." _Race and Social Problems_. 
+
+* Bullock, John G. (2020). “Education and Attitudes toward Redistribution in the United States.” British Journal of Political Science: 1–21.
+
+* Federico, Christopher M. (2004) "When Do Welfare Attitudes Become Racialized? The Paradoxical Effects of Education," _American Journal of Political Science_, 48(2):374-391.
+
+* Kingston, Paul W., Ryan Hubbard, Brent Lapp, Paul Schroeder and Julia Wilson. (2003). "Why Education Matters." _Sociology of Education_ 76(1): 53-70. 
+
+* Legerski, Elizabeth Miklya and Justin Allen Berg (2018). "Does educational attainment influence the relationship between political orientation and opinions toward the Affordable Care Act?" _Health Sociology Review_, 27(1):75-88.
+
+* Peterson, Larry R. "Religion, Plausibility Structures, and Education's Effect on Attitudes Toward Elective Abortion." _Journal for the Scientific Study of Religion_, 40(2): 187-204. 
+
+* Sniderman, Paul M., Richard A. Brody, and Phillip E,. Tetlock (1993). _Reasoning and Choice: Explorations in Political Psychology_. Cambridge University Press: 9-10. 
+
+\newpage
+# Appendix: 
+
+## List of variables: 
+
+**Outcome variable:**
+
+940207 94PO:   
+**Approve/disapprove Clinton - health care**.   
+"Do you approve or disapprove of the way Bill Clinton is handling health care reform?" 
+1. Approve, 5. Disapprove. 8 Don't know.  
+132 don't know, 4 NA, out of 1795 total = 7.58%
+
+**Explanatory variables:** 
+
+941206 94PO:  
+**Highest grade of education.**  
+00 - 12 (grades of school); 13 - 17+ (college)
+96. Inap (not asked); 98. don't know (DK), 99. NA  
+761 = 42.40% recoded "NA".
+
+940652 94PO:  
+**Is R Republican, Democrat or Independent?**  
+1. Republican 2. Independent 3. No Preference 4. Other Party 5. Democrat 8. DK 9. NA  
+126 = 7.02% recoded "NA".
+ 
+941203 94PO:   
+**Recorded age.**   
+18-91 actual age; 99. 99 years or older.  
+0 "NA". 
+
+941435 94PO:   
+**R's race.**   
+1. White 2. Black 3. American Indian or Alaskan Native 4. Asian or Pacific Islander 9. NA.   
+38 = 2.12% "NA". 
+
+941434 94PO:  
+**R's gender.**  
+1. Male 2. Female 9. NA  
+0 "NA". 
+
+V941404:   
+**Family Income:**   
+88. DK, 98. Refused, 99. NA  
+146 = 8.13% recoded "NA".   
+
+````{r income-vector, echo=FALSE}
+
+
+income_vector <- c("1. $0 - $2,999", "2. $3,000-$4,999","3. $5,000-$6,999", 
+                   "4. $7,000-$8,999", "5. $9,000-$9,999", "6. $10,000-$10,999",
+                   "7. $11,000-$11,999", "8. $12,000-$12,999", 
+                   "9. $13,000-$13,999","10. $14,000-$14,99", 
+                   "11. $15,000-$16,999", "12. $17,000-$19,999", 
+                   "13. $20,000-$21,999", "14. $22,000-$24,999", 
+                   "15. $25,000-$29,999", "16. $30,000-$34,999",
+                    "17. $35,000-$39,999", "18. $40,000-$44,999",
+                   "19. $45,000-$49,999", "20. $50,000-$59,999",
+                   "21. $60,000-$74,999", "22. $75,000-$89,999",
+                   "23. $90,000-$104,999","24. $105,000 AND OVER")
+
+income_matrix <- matrix(data = income_vector, nrow = 8, ncol = 3)
+
+write.table(income_matrix, row.names=FALSE, col.names=FALSE, sep = " ") 
+
+
+```
+.  
+
+**The "Racial Attitude" scale questions:** 
+To the following, answer:   
+ 1. AGREE STRONGLY  
+ 2. AGREE SOMEWHAT  
+ 3. NEITHER AGREE NOR DISAGREE  
+ 4. DISAGREE SOMEWHAT  
+ 5. DISAGREE STRONGLY  
+ 8. DK  
+ 9. NA  
+ 
+ 
+(1) V941048: Over the past few years, blacks have gotten less than they deserve. 
+ 
+(2) V941049: Irish, Italians, Jewish and many other minorities overcame prejudice and worked their way up. Blacks should do the same without any special favors.
+ 
+(3)  V941050: It's really a matter of some people not trying hard enough; if blacks would only try harder they could be just as well off as whites. 
+
+(4) V941051: Generations of slavery and discrimination have created conditions that make it difficult for blacks to work their way out of the lower class.
+ 
+The new variable **Racial Hostility** was created by taking the mean of these four questions after they were re-scaled to indicate increasing hostility (the responses to questions 2 and 3 had to have their numeric codes inverted). There were between 42 and 46 NA's in the four questions that made up the new variable "hostility". 
+
+
+```{r appendix-data-scrubbing, include = FALSE}
+# Check total number of data points to recode or omit:
+
+df_cleaned$clinton_plan %>% summary() # 132 dk, 4 na = 7.58%
+df_cleaned %>% filter(education >= 96) %>% nrow() # 761 = 42.40%
+df_cleaned$party %>% summary() 
+    # 113 no preference (3); 5 other (4), 2 DK (8), 6 NA (9) = 126 = 7.02%
+df_cleaned$age %>% summary() #0 NA's
+df_cleaned$race %>% summary()
+    # 41 NA's' 16 + 22 not White or Black = 38. 
+df_cleaned$sex %>% summary() #0 NA's
+df_cleaned$income %>% summary()
+    # 88. DK = 60; 98. Refused = 83; 99. NA = 3 --> 146 = 8.13%
+sum(is.na(df_cleaned$attitude1_scaled))
+    # 46 NA
+sum(is.na(df_cleaned$attitude2_scaled))
+    # 42 NA
+sum(is.na(df_cleaned$attitude3_scaled))
+    # 46 NA
+sum(is.na(df_cleaned$attitude4_scaled))
+    # 46 NA
+
+```
+
+```{r missing-values, echo=FALSE, out.width="50%"}
+naniar::gg_miss_var(anes) + 
+    ggtitle("Number of Missing Values in Each Variable")
+```
+
+## Check Missingness of Education: 
+Does the group with data missing for education look the same as the group with education data? 
+
+
+```{r missing-graphs, echo = FALSE, out.width="50%"}
+# Does missing education group look like the education group?
+
+check_missingness <- anes %>% mutate(
+    ed_na = ifelse(is.na(education_num), "NA", "!NA") %>% 
+        as.factor()
+)
+
+check_missingness %>% ggplot() + 
+    geom_bar(aes(x=clinton_plan_fct))+
+    facet_wrap(~ed_na)+
+    labs(title = "Approval by Education Not Missing (!NA) and Missing (NA)", 
+         x = "Approval", 
+         y = "Count")
+
+check_missingness %>% ggplot() + 
+    geom_bar(aes(x=party_fct))+
+    facet_wrap(~ed_na)+
+    labs(title = "Party by Education Not Missing (!NA) and Missing (NA)", 
+         x = "Party", 
+         y = "Count")
+
+check_missingness %>% ggplot() + 
+    geom_boxplot(aes(y=age))+
+    facet_wrap(~ed_na)+
+    labs(title = "Age by Education Not Missing (!NA) and Missing (NA)", 
+         x = "Missingness", 
+         y = "Age")
+
+check_missingness %>% ggplot() + 
+    geom_bar(aes(x=sex_fct))+
+    facet_wrap(~ed_na)+
+    labs(title = "Sex by Education Not Missing (!NA) and Missing (NA)", 
+         x = "Sex", 
+         y = "Count")
+
+check_missingness %>% ggplot() + 
+    geom_bar(aes(x=race_fct))+
+    facet_wrap(~ed_na)+
+    labs(title = "Race by Education Not Missing (!NA) and Missing (NA)", 
+         x = "Race", 
+         y = "Count")
+
+check_missingness %>% ggplot() + 
+    geom_boxplot(aes(y=income_num))+
+    facet_wrap(~ed_na)+
+    labs(title = "Income by Education Not Missing (!NA) and Missing (NA)", 
+         x = "Missingness", 
+         y = "Income")
+
+check_missingness %>% ggplot() + 
+    geom_boxplot(aes(y=hostility))+
+    facet_wrap(~ed_na)+
+    labs(title = "Racial Hostility by Education Not Missing (!NA) and Missing (NA)", 
+         x = "Missingness", 
+         y = "Hostility Rating")
+```
+
+```{r missing-calculations, include=FALSE}
+# How many more Democrats, White, Female, How much Higher Income?
+
+ed_na <- anes %>% filter(is.na(education_num))
+ed <- anes %>% filter(!is.na(education_num))
+
+summary(ed_na$party_fct) # 260 Dem / (239+260+225+37) = 34.2%
+summary(ed$party_fct) # 352 Dem / (305+352+288+89) = 34%
+
+summary(ed_na$race_fct) # 618 White / (618+95+15+33) = 81.2%
+summary(ed$race_fct) # 896 White / (896 +107+23+8) = 86.7%
+
+summary(ed_na$sex_fct) # 401 Female / (360+401) = 52.7%
+summary(ed$sex_fct) # 558 Female / (476+558) = 54% 
+
+summary(ed_na$income_num) # Median = 17.0, Mean = 15.3
+summary(ed$income_num) # Median = 15.0, Mean = 14.3 
+```
+
+The group WITH data for education has slightly more white people than the group missing data  (86.7% vs 81.2% white); has slightly more females (54% female vs. 52.7% female); and has slightly lower income than the group missing education data (Median = 15.0, Mean =14.3, vs. Median = 17.0, Mean = 15.3). For all other variables, the groups are quite similar. 
+
+## Tests of Logistic Regression Assumptions
+Most of the assumptions of logistic regression appear to be met: the outcome variable is binary (approval/disapproval); the observations are independent because the survey took a cross-section of the entire adult U.S. population with one survey per household, so it is unlikely any response affected another; tests indicate little to no multicollinearity of the variables; and there are no influential values. However, the linearity assumption may be violated for age, education, hostility, and income, but no transformation seemed warranted, so we proceed as if the assumptions are met.   
+
+**Multicollinearity:** 
+The variables do not appear to be collinear, as all the variance inflation factors are much less than 5.   
+```{r assumptions-multicollinearity, echo=FALSE}
+# Multicollinearity:
+car::vif(mod_party_host) 
+```
+
+**Influential values:** 
+There do not appear to be any influential values. 
+```{r assumptions-influential-values, include=FALSE}
+# Influential values: 
+plot(mod_party_host, which=4) # 3 potential outliers
+
+    # Extract model results: 
+model.data <- broom::augment(mod_party_host) %>% 
+    mutate(index = 1:n())
+    
+    # Look at the three potential outliers: 
+model.data %>% top_n(3, .cooksd)
+
+ # Do any data pionts have abs(standard residual) > 3?
+model.data %>% filter(abs(.std.resid)>3) #0, no influential observations. 
+```
+
+```{r echo = FALSE}
+    # plot the standardized residuals: 
+ggplot(model.data, aes(index, .std.resid))+
+    geom_point(aes(color = as.factor(clinton_plan_bin)), alpha = .5) +
+    labs(color = "Approval,0 = no, 1 = yes",
+         title = "Plot of standardized residuals \nto check for influential observations", 
+         x = "index", 
+         y = "standardized residual")
+
+```
+
+**Linearity**:
+```{r assumptions-linearity, echo=FALSE}
+# Linearity: 
+    
+    # Select numeric predictors: 
+mydata <- mod_full$model %>% 
+        # this is the data with no NA's in mod_full
+    select_if(is.numeric) %>% 
+    select(-clinton_plan_bin)
+
+probabilities <- predict(mod_full, type = "response")
+
+    # calculate the logit predicted value for each predictor,
+    # and the predicted 1/0 value: 
+mydata <- mydata %>% 
+    mutate(logit = log(probabilities/(1-probabilities))) %>% 
+    tidyr::gather(key = "predictors", value = "predictor.value", -logit)
+               
+    # create scatter plots: 
+ggplot(mydata, aes(logit, predictor.value))+
+    geom_point(size = 0.5, alpha = 0.5) + 
+    geom_smooth(method = "loess") +
+    theme_bw()+
+    facet_wrap(~predictors, scales = "free_y")+
+    ggtitle("Tests of Linearity Assumption")
+```
+The linearity assumption may be violated for age, education, hostility, and income, as the plots of values vs. predicted logit values are not entirely linear. 
+
+
+### ANOVA tables to compare models: 
+
+```{r anova, include = FALSE}
+### NAIVE vs. PARTY: 
+# Subset data to compare mod_naive with mod_party: 
+subset_data_1 <- mod_party$model
+
+# re-run models with missingness dropped:
+glm_mod_naive <- glm(clinton_plan_bin ~ education_num,
+                      data = subset_data_1, family = binomial)
+
+glm_mod_party <- glm(clinton_plan_bin ~ education_num + party_fct,
+                      data = subset_data_1, family = binomial)
+
+# anova naive vs. party: 
+naive_vs_party <- anova(glm_mod_naive, glm_mod_party, test = "Chisq")
+
+
+
+### PARTY vs INTERACT PARTY X EDUCATION:
+subset_data_2 <- mod_interact$model
+
+glm_mod_party_2 <- glm(clinton_plan_bin ~ education_num + party_fct,
+                       data = subset_data_2, family = binomial)
+
+glm_mod_interact <- glm(clinton_plan_bin ~ education_num +
+                            education_num*party_fct, 
+                        data =subset_data_2, family = binomial)
+
+party_vs_interact <- anova(glm_mod_party_2, glm_mod_interact, test = "Chisq")
+
+
+
+## PARTY vs PARTY_HOST: 
+# Subset data to compare mod_party with mod_party_host: 
+subset_data_3 <- mod_party_host$model
+
+# re-run models with missingness dropped:
+glm_mod_party_3 <- glm(clinton_plan_bin ~ education_num + party_fct,
+                      data = subset_data_3, family = binomial)
+
+glm_mod_party_host <- glm(clinton_plan_bin ~ education_num + party_fct +
+                              hostility,
+                      data = subset_data_3, family = binomial)
+
+# anova party vs. party_host: 
+party_vs_party_host <- anova(glm_mod_party_3, glm_mod_party_host, test = "Chisq")
+
+
+## PARTY_HOST vs. FULL: 
+# Subset data to compare mod_party with mod_party_host: 
+subset_data_4 <- mod_full$model
+
+# re-run models with missingness droped:
+glm_mod_party_host_2 <- glm(clinton_plan_bin ~ education_num +
+                                party_fct + hostility,
+                      data = subset_data_4, family = binomial)
+
+glm_mod_full <- glm (clinton_plan_bin ~ education_num + party_fct + age + 
+                         sex_fct + race_fct + income_num + hostility, 
+                      data = subset_data_4, family = binomial)
+
+# ANOVA party_host vs. full model: 
+party_host_vs_full <- anova(glm_mod_party_host_2, glm_mod_full, test = "Chisq")
+
+```
+
+```{r anova-tables, echo=FALSE, results = "asis"}
+
+naive_vs_party %>% 
+    xtable(
+    caption = "Simple Bivariate Model (1) vs. 
+           Model Controlling for Party (2)", 
+    table.placement = "h"
+    ) %>% 
+    print(type = "latex")
+
+party_vs_interact %>% 
+    xtable(
+    caption = "Parallel Lines Party Model (2) vs. 
+           Different Slopes Party Model (3)",
+    table.placement = "h"
+    ) %>% 
+    print(type = "latex")
+
+party_vs_party_host %>% 
+    xtable(
+    caption = "Model Controlling for Party (2) vs.
+           Model Controlling for Party and Racial Hostility (4)",
+    table.placement = "h"
+    ) %>% 
+    print(type = "latex")
+
+party_host_vs_full %>% 
+    xtable(
+        caption = "Model Controlling for Party and Racial Hostility (4),
+        vs. Full Model (5)", 
+        table.placement = "h"
+    ) %>% 
+    print(type = "latex")
+
+```
+
+### Explanations of Calculations: 
+
+**Model 4:**   
+_Education_: exp($\beta1$) = exp(-0.067) = 0.935.    
+1-0.935 = 6.5%.     
+
+_Going from college (education = 16) to high school (education = 12)_:     
+exp(-0.067*(16-12)) =  0.765, or about 3/4 the odds of approval  
+
+_Going from college (education = 16) to junior high (education = 8)_:   
+exp(-0.067*(16-8))=  0.585 ~ 3/5 the odds of approval  
+
+_Racial hostility_:   
+exp(-0.256) = 0.774  
+95% CI:   
+exp(-0.256 + (1.96 *0.088))    
+exp(-0.256 - (1.96 *0.088)) =  .651 to .92  
+
+_Party_:   
+Democrats:  
+exp(1.96) = 7.1  
+Independents:  
+exp(1.26) = 3.53    
+
+.  
+
+**Model 3**:
+
+$$log(Odds) = 0.632 -0.190*Education + 0.159*Democrat - 1.470*Independent + $$ $$0.146*(Education x Democrat) + 0.213(Education x Independent)$$  
+
+. 
+
+Calculate derivative logOdds/education give R/D/I:
+.  
+
+$\displaystyle \frac{\partial logOddsApprove}{\partial education} | Republican = -0.190$
+
+
+$\displaystyle \frac{\partial logOddsApprove}{\partial education}  | Democrat = -0.190 + 0.146 = -0.044$
+
+
+$\displaystyle \frac{\partial logOddsApprove}{\partial education}  | Independent = -0.190 + 0.213 = 0.023$
+
+
+.  
+
+Republicans:  
+
+exp(-0.190) = 0.827 = 17.3% lower odds for each year education  
+
+Democrats:   
+
+exp(-0.044) = 0.957 = 4.3% lower odds for each year education  
+
+Independents:   
+
+exp(0.023) = 1.02 = increased odds by multiplicative factor of 1.02
+   
+
